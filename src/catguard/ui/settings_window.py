@@ -27,7 +27,7 @@ class SettingsFormModel:
     """
 
     camera_index: int = 0
-    confidence_threshold: float = 0.40
+    confidence_threshold: float = 0.25
     cooldown_seconds: float = 15.0
     sound_library_paths: List[str] = field(default_factory=list)
     autostart: bool = False

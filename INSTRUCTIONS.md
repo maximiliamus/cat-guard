@@ -7,3 +7,8 @@
 - Before implementing new approaches, research existing patterns within the codebase and follow established conventions to ensure consistency. Include such found and applied patterns in the task completion report.
 
 @INSTRUCTIONS.local.md
+
+# Tech Stack
+
+- Python 3 
+- venv

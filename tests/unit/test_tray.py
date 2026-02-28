@@ -58,6 +58,55 @@ class TestMenuItems:
             ]
             assert any("Exit" in str(label) for label in labels)
 
+    def test_open_item_present(self):
+        """T018 — tray menu must expose an 'Open' item for the main window."""
+        root = MagicMock()
+        stop_event = threading.Event()
+        settings = Settings()
+        on_save = MagicMock()
+
+        with patch("catguard.tray.pystray") as mock_pystray:
+            mock_pystray.Icon.return_value = MagicMock()
+            mock_pystray.Menu = MagicMock(wraps=lambda *items: items)
+            mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
+
+            build_tray_icon(root, stop_event, settings, on_save, MagicMock())
+
+            labels = [
+                call_args[0][0]
+                for call_args in mock_pystray.MenuItem.call_args_list
+            ]
+            assert any("Open" in str(label) for label in labels), \
+                f"'Open' not found in tray menu items: {labels}"
+
+    def test_menu_order_settings_open_exit(self):
+        """T019 — menu order must be Settings…, Open, Exit."""
+        root = MagicMock()
+        stop_event = threading.Event()
+        settings = Settings()
+        on_save = MagicMock()
+
+        with patch("catguard.tray.pystray") as mock_pystray:
+            mock_pystray.Icon.return_value = MagicMock()
+            mock_pystray.Menu = MagicMock(wraps=lambda *items: items)
+            mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
+
+            build_tray_icon(root, stop_event, settings, on_save, MagicMock())
+
+            labels = [
+                call_args[0][0]
+                for call_args in mock_pystray.MenuItem.call_args_list
+            ]
+            settings_idx = next((i for i, l in enumerate(labels) if "Settings" in str(l)), None)
+            open_idx = next((i for i, l in enumerate(labels) if l == "Open"), None)
+            exit_idx = next((i for i, l in enumerate(labels) if "Exit" in str(l)), None)
+            assert settings_idx is not None, "Settings… not found"
+            assert open_idx is not None, "Open not found"
+            assert exit_idx is not None, "Exit not found"
+            assert settings_idx < open_idx < exit_idx, \
+                f"Expected Settings < Open < Exit, got indices {settings_idx}, {open_idx}, {exit_idx}"
+
+
 
 class TestOnExit:
     def test_exit_sets_stop_event(self):

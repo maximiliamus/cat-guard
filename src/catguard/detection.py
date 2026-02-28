@@ -21,6 +21,11 @@ from typing import Callable, Optional
 
 from catguard.config import Settings
 
+try:
+    import numpy as np  # available when opencv-python is installed
+except ImportError:  # pragma: no cover
+    np = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # YOLO COCO class index for 'cat'
@@ -118,6 +123,8 @@ class DetectionLoop:
         self._stop_event = threading.Event()
         self._last_alert_time: Optional[datetime] = None
         self._model = None
+        self._frame_callback: Optional[Callable] = None
+        self._frame_callback_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Public API
@@ -138,6 +145,22 @@ class DetectionLoop:
         if self._thread is not None:
             self._thread.join(timeout=5.0)
         logger.info("DetectionLoop stopped.")
+
+    def set_frame_callback(
+        self, cb: Optional[Callable[["np.ndarray", list], None]]
+    ) -> None:
+        """Set or clear the per-frame callback invoked after each inference cycle.
+
+        Thread-safe: the callback is swapped atomically under a lock.
+        Pass *cb=None* to disable delivery (zero overhead when window is closed).
+
+        The callback is invoked as ``cb(frame_bgr, detections)`` where
+        *frame_bgr* is the raw BGR numpy ndarray and *detections* is the
+        list of YOLO result objects from that inference cycle.
+        """
+        with self._frame_callback_lock:
+            self._frame_callback = cb
+        logger.debug("Frame callback %s.", "registered" if cb is not None else "cleared")
 
     # ------------------------------------------------------------------
     # Internal
@@ -199,7 +222,7 @@ class DetectionLoop:
                     conf=conf,
                     classes=[CAT_CLASS_ID],
                     device="cpu",
-                    imgsz=320,  # 320 instead of 640 → ~4× faster on CPU
+                    imgsz=640,  # 640px: needed to reliably detect cats further from the camera
                     verbose=False,
                 )
 
@@ -239,6 +262,16 @@ class DetectionLoop:
                 # the thread wakes up immediately when stop() is called.
                 if self._stop_event.wait(timeout=0.05):
                     break
+
+                # Deliver frame + results to optional UI callback (MainWindow).
+                # Snapshot the callback reference atomically to avoid TOCTOU.
+                with self._frame_callback_lock:
+                    cb = self._frame_callback
+                if cb is not None:
+                    try:
+                        cb(frame, results)
+                    except Exception:  # pragma: no cover
+                        logger.exception("Frame callback raised an exception.")
         finally:
             cap.release()
             logger.info("Camera %d released.", self._settings.camera_index)

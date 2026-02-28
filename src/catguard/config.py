@@ -42,7 +42,7 @@ class Settings(BaseModel):
         description="Index of the webcam to use (OpenCV VideoCapture index).",
     )
     confidence_threshold: float = Field(
-        default=0.40,
+        default=0.25,
         ge=0.0,
         le=1.0,
         description=(

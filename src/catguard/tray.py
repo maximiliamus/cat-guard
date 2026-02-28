@@ -26,6 +26,36 @@ _ICON_PATH = Path(__file__).parent.parent.parent / "assets" / "icon.png"
 _ICON_ICO_PATH = Path(__file__).parent.parent.parent / "assets" / "icon.ico"
 
 
+def _ensure_main_window(root, detection_loop) -> None:
+    """Create MainWindow if absent, register frame callback, then show/focus."""
+    from catguard.ui.main_window import MainWindow
+
+    win = getattr(root, "_main_window", None)
+    if win is None:
+        win = MainWindow(root)
+        # Clear the callback when the user closes the window
+        win._on_close_extra = lambda: detection_loop.set_frame_callback(None)
+
+    # Register frame delivery callback so the window receives live frames.
+    # The lambda posts to the main thread via root.after for thread safety.
+    def _on_frame(frame_bgr, detections) -> None:
+        try:
+            root.after(0, lambda f=frame_bgr, d=detections: win.update_frame(f, d))
+        except Exception:
+            pass  # root may be destroyed during shutdown
+
+    detection_loop.set_frame_callback(_on_frame)
+    logger.info("Main window frame callback registered.")
+    win.show_or_focus()
+
+
+def _on_open_clicked_factory(root, detection_loop):
+    """Return a pystray menu handler bound to *root* and *detection_loop*."""
+    def handler(icon, item) -> None:  # pragma: no cover — runs in pystray thread
+        logger.info("Open clicked — main window requested.")
+        root.after(0, lambda: _ensure_main_window(root, detection_loop))
+    return handler
+
 def build_tray_icon(
     root,
     stop_event: threading.Event,
@@ -51,8 +81,11 @@ def build_tray_icon(
     def on_exit_clicked(icon, item):
         _on_exit(icon, root, stop_event)
 
+    on_open_clicked = _on_open_clicked_factory(root, detection_loop)
+
     menu = pystray.Menu(
         pystray.MenuItem("Settings\u2026", on_settings_clicked),
+        pystray.MenuItem("Open", on_open_clicked),
         pystray.MenuItem("Exit", on_exit_clicked),
     )
 
