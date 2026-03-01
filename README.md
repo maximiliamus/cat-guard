@@ -1,6 +1,6 @@
 # Overview
 
-CatGuard is an application that uses a webcam to monitor your table for your cat. If a cat is detected on the table, the app plays a sound to scare it away. So, it protects your work table from your cat and protects your cat from you - your punishment if it accidentally breaks something on your table. :-)
+CatGuard is an application that uses a webcam to monitor your table for your cat. If a cat is detected on the table, the app plays a sound to scare it away. So, it protects your work table from your cat and protects your cat from you - your punishment if it accidentally breaks something on your table :-)
 
 # Quickstart
 
@@ -43,3 +43,8 @@ On first run, CatGuard will:
 - AI-driven
 - Spec-driven with [Spec Kit](https://github.com/github/spec-kit)
 - Cross-platform
+
+# Interesting Facts
+
+- Default sound is cut from "Tom spells CAT" from https://www.tomandjerryonline.com/sounds.cfm
+- This app doesn't help me with my cat :-)
