@@ -31,6 +31,11 @@ class SettingsFormModel:
     cooldown_seconds: float = 15.0
     sound_library_paths: List[str] = field(default_factory=list)
     autostart: bool = False
+    # Screenshot fields (T013 / T023)
+    screenshots_root_folder: str = ""
+    screenshot_window_enabled: bool = False
+    screenshot_window_start: str = "22:00"
+    screenshot_window_end: str = "06:00"
 
     # ------------------------------------------------------------------
     # Factory
@@ -45,6 +50,10 @@ class SettingsFormModel:
             cooldown_seconds=s.cooldown_seconds,
             sound_library_paths=list(s.sound_library_paths),
             autostart=s.autostart,
+            screenshots_root_folder=s.screenshots_root_folder,
+            screenshot_window_enabled=s.screenshot_window_enabled,
+            screenshot_window_start=s.screenshot_window_start,
+            screenshot_window_end=s.screenshot_window_end,
         )
 
     # ------------------------------------------------------------------
@@ -59,6 +68,10 @@ class SettingsFormModel:
             cooldown_seconds=self.cooldown_seconds,
             sound_library_paths=list(self.sound_library_paths),
             autostart=self.autostart,
+            screenshots_root_folder=self.screenshots_root_folder,
+            screenshot_window_enabled=self.screenshot_window_enabled,
+            screenshot_window_start=self.screenshot_window_start,
+            screenshot_window_end=self.screenshot_window_end,
         )
 
     # ------------------------------------------------------------------
@@ -191,6 +204,84 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     auto_var = tk.BooleanVar(value=model.autostart)
     tk.Checkbutton(win, text="Start CatGuard at login", variable=auto_var).grid(row=5, column=1, sticky="w", **pad)
 
+    # ---- Screenshots section (T014) --------------------------------------
+    tk.Label(win, text="Screenshots:", font=(None, 9, "bold")).grid(
+        row=6, column=0, sticky="nw", **pad
+    )
+
+    # Root folder row
+    tk.Label(win, text="Root folder:").grid(row=7, column=0, sticky="w", **pad)
+    folder_var = tk.StringVar(value=model.screenshots_root_folder)
+    folder_entry = tk.Entry(win, textvariable=folder_var, width=34, state="readonly")
+    folder_entry.grid(row=7, column=1, sticky="w", **pad)
+
+    def _browse_folder():
+        chosen = filedialog.askdirectory(
+            parent=win,
+            title="Select screenshots root folder",
+            initialdir=model.screenshots_root_folder or None,
+        )
+        if chosen:
+            folder_var.set(chosen)
+
+    tk.Button(win, text="Browse\u2026", command=_browse_folder).grid(
+        row=8, column=1, sticky="w", **pad
+    )
+
+    # Resolve and display the effective (default) path when field is empty
+    try:
+        from catguard.screenshots import resolve_root
+        from catguard.config import Settings as _S
+        _tmp = _S(screenshots_root_folder="")
+        _default_path = str(resolve_root(_tmp))
+    except Exception:
+        _default_path = "Pictures/CatGuard"
+
+    tk.Label(
+        win,
+        text=f"Default: {_default_path}",
+        fg="gray",
+        font=(None, 8),
+    ).grid(row=9, column=1, sticky="w", **pad)
+
+    # Time window subsection (T024) ----------------------------------------
+    win_enabled_var = tk.BooleanVar(value=model.screenshot_window_enabled)
+    tk.Checkbutton(
+        win,
+        text="Only save screenshots within a daily time window",
+        variable=win_enabled_var,
+    ).grid(row=10, column=1, sticky="w", **pad)
+
+    win_start_var = tk.StringVar(value=model.screenshot_window_start)
+    win_end_var = tk.StringVar(value=model.screenshot_window_end)
+
+    tw_frame = tk.Frame(win)
+    tw_frame.grid(row=11, column=1, sticky="w", **pad)
+    tk.Label(tw_frame, text="From:").pack(side="left")
+    start_spin = tk.Spinbox(
+        tw_frame, textvariable=win_start_var, values=(
+            *(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),
+        ),
+        width=6,
+    )
+    start_spin.pack(side="left", padx=(2, 6))
+    tk.Label(tw_frame, text="To:").pack(side="left")
+    end_spin = tk.Spinbox(
+        tw_frame, textvariable=win_end_var, values=(
+            *(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),
+        ),
+        width=6,
+    )
+    end_spin.pack(side="left", padx=2)
+
+    def _update_tw_state(*_):
+        state = "normal" if win_enabled_var.get() else "disabled"
+        start_spin.config(state=state)
+        end_spin.config(state=state)
+
+    win_enabled_var.trace_add("write", _update_tw_state)
+    _update_tw_state()  # set initial state
+
     # ---- Buttons ---------------------------------------------------------
     def _on_close():
         try:
@@ -222,6 +313,10 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.sound_library_paths = list(path_listbox.get(0, tk.END))
         new_autostart = auto_var.get()
         model.autostart = new_autostart
+        model.screenshots_root_folder = folder_var.get()
+        model.screenshot_window_enabled = win_enabled_var.get()
+        model.screenshot_window_start = win_start_var.get()
+        model.screenshot_window_end = win_end_var.get()
 
         # Apply autostart change if it differs from current
         if new_autostart and not is_autostart_enabled():
@@ -236,7 +331,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         _on_close()
 
     btn_row = tk.Frame(win)
-    btn_row.grid(row=6, column=0, columnspan=2, pady=8)
+    btn_row.grid(row=12, column=0, columnspan=2, pady=8)
     tk.Button(btn_row, text="Save", command=_save, width=10).pack(side="left", padx=4)
     tk.Button(btn_row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=4)
 

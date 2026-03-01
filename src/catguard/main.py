@@ -23,7 +23,8 @@ def main() -> None:
     from catguard.audio import init_audio, play_random_alert, shutdown_audio
     from catguard.config import load_settings, save_settings
     from catguard.detection import DetectionEvent, DetectionLoop
-    from catguard.tray import build_tray_icon
+    from catguard.screenshots import save_screenshot
+    from catguard.tray import build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
     # 1. Logging
@@ -43,18 +44,39 @@ def main() -> None:
     default_sound = assets_dir / "default.wav"
 
     # ------------------------------------------------------------------
-    # 4. Detection (pull model: loop reads settings reference each frame)
+    # 4. tkinter root (created early so on_cat_detected can close over it)
+    # ------------------------------------------------------------------
+    root = tk.Tk()
+    root.withdraw()  # hide the root window; tray is the primary UI
+    root._main_window_visible = False  # visibility flag read by save_screenshot
+
+    # ------------------------------------------------------------------
+    # 5. Detection (pull model: loop reads settings reference each frame)
     # ------------------------------------------------------------------
     stop_event = threading.Event()
 
+    def _on_screenshot_error(msg: str) -> None:
+        """Forward screenshot save errors to the tray balloon if available."""
+        icon = getattr(root, "_tray_icon", None)
+        if icon is not None:
+            notify_error(icon, msg)
+        else:
+            logger.warning("Screenshot error (tray not ready): %s", msg)
+
     def on_cat_detected(event: DetectionEvent) -> None:
         play_random_alert(settings.sound_library_paths, default_sound)
+        save_screenshot(
+            event.frame_bgr,
+            settings,
+            is_window_open=lambda: getattr(root, "_main_window_visible", False),
+            on_error=_on_screenshot_error,
+        )
 
     detection_loop = DetectionLoop(settings, on_cat_detected)
     detection_loop.start()
 
     # ------------------------------------------------------------------
-    # 5. Shutdown handler (SIGINT / SIGTERM)
+    # 6. Shutdown handler (SIGINT / SIGTERM)
     # ------------------------------------------------------------------
     def on_shutdown(*_args) -> None:
         logger.info("Shutting down CatGuard…")
@@ -68,7 +90,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, on_shutdown)
 
     # ------------------------------------------------------------------
-    # 6. Settings save callback (updates shared settings in-place — pull model)
+    # 7. Settings save callback (updates shared settings in-place — pull model)
     # ------------------------------------------------------------------
     def on_settings_saved(new_settings) -> None:
         save_settings(new_settings)
@@ -77,14 +99,12 @@ def main() -> None:
         logger.info("Settings saved and propagated to detection loop.")
 
     # ------------------------------------------------------------------
-    # 7. Tray + tkinter main loop
+    # 8. Tray + tkinter main loop
     # ------------------------------------------------------------------
-    root = tk.Tk()
-    root.withdraw()  # hide the root window; tray is the primary UI
-
     tray_icon = build_tray_icon(
         root, stop_event, settings, on_settings_saved, detection_loop
     )
+    root._tray_icon = tray_icon  # expose to on_cat_detected via root reference
 
     if platform.system() == "Darwin":
         # macOS: pystray must run detached so tkinter can own the main thread

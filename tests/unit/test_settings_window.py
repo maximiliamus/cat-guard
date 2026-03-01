@@ -32,7 +32,7 @@ class TestSettingsFormModel:
     def test_defaults_populated(self):
         model = SettingsFormModel.from_settings(Settings())
         assert model.camera_index == 0
-        assert model.confidence_threshold == 0.40
+        assert model.confidence_threshold == 0.25
         assert model.cooldown_seconds == 15.0
         assert model.autostart is False
 
@@ -76,3 +76,72 @@ class TestSettingsFormModel:
         assert len(cameras) == 2
         assert cameras[0].index == 0
         assert cameras[1].index == 1
+
+
+# ---------------------------------------------------------------------------
+# T012: SettingsFormModel.screenshots_root_folder
+# ---------------------------------------------------------------------------
+
+class TestSettingsFormModelScreenshotsRootFolder:
+    """T012 \u2014 screenshots_root_folder field on SettingsFormModel (TDD RED before T013)."""
+
+    def test_from_settings_populates_screenshots_root_folder(self):
+        s = Settings(screenshots_root_folder="/my/screenshots")
+        model = SettingsFormModel.from_settings(s)
+        assert model.screenshots_root_folder == "/my/screenshots"
+
+    def test_from_settings_empty_root_folder(self):
+        s = Settings(screenshots_root_folder="")
+        model = SettingsFormModel.from_settings(s)
+        assert model.screenshots_root_folder == ""
+
+    def test_to_settings_round_trip_root_folder(self):
+        s = Settings(screenshots_root_folder="/tmp/cats")
+        model = SettingsFormModel.from_settings(s)
+        restored = model.to_settings()
+        assert restored.screenshots_root_folder == "/tmp/cats"
+
+    def test_screenshots_root_folder_default_is_empty(self):
+        model = SettingsFormModel.from_settings(Settings())
+        assert model.screenshots_root_folder == ""
+
+
+# ---------------------------------------------------------------------------
+# T021: SettingsFormModel time-window fields
+# ---------------------------------------------------------------------------
+
+class TestSettingsFormModelTimeWindow:
+    """T021 \u2014 time-window fields on SettingsFormModel (TDD RED before T023)."""
+
+    def test_from_settings_populates_window_enabled(self):
+        s = Settings(screenshot_window_enabled=True)
+        model = SettingsFormModel.from_settings(s)
+        assert model.screenshot_window_enabled is True
+
+    def test_from_settings_populates_window_start(self):
+        s = Settings(screenshot_window_start="21:00")
+        model = SettingsFormModel.from_settings(s)
+        assert model.screenshot_window_start == "21:00"
+
+    def test_from_settings_populates_window_end(self):
+        s = Settings(screenshot_window_end="07:00")
+        model = SettingsFormModel.from_settings(s)
+        assert model.screenshot_window_end == "07:00"
+
+    def test_to_settings_round_trip_time_window(self):
+        s = Settings(
+            screenshot_window_enabled=True,
+            screenshot_window_start="21:30",
+            screenshot_window_end="05:45",
+        )
+        model = SettingsFormModel.from_settings(s)
+        restored = model.to_settings()
+        assert restored.screenshot_window_enabled is True
+        assert restored.screenshot_window_start == "21:30"
+        assert restored.screenshot_window_end == "05:45"
+
+    def test_default_window_fields(self):
+        model = SettingsFormModel.from_settings(Settings())
+        assert model.screenshot_window_enabled is False
+        assert model.screenshot_window_start == "22:00"
+        assert model.screenshot_window_end == "06:00"

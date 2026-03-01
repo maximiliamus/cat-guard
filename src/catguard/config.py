@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import List
 
@@ -64,12 +65,63 @@ class Settings(BaseModel):
         default=False,
         description="Whether the app starts automatically on user login.",
     )
+    screenshots_root_folder: str = Field(
+        default="",
+        description=(
+            "Absolute path to the screenshots root folder. "
+            "Empty string means use the OS default (Pictures/CatGuard)."
+        ),
+    )
+    screenshot_window_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True, screenshots are only saved within the configured "
+            "daily time window."
+        ),
+    )
+    screenshot_window_start: str = Field(
+        default="22:00",
+        description="Start of the daily screenshot window (HH:MM, local time).",
+    )
+    screenshot_window_end: str = Field(
+        default="06:00",
+        description=(
+            "End of the daily screenshot window (HH:MM, local time). "
+            "May precede start to span midnight."
+        ),
+    )
 
     @field_validator("sound_library_paths")
     @classmethod
     def prune_stale_paths(cls, paths: List[str]) -> List[str]:
         """Silently drop paths that no longer exist on disk."""
         return [p for p in paths if Path(p).is_file()]
+
+    @field_validator("screenshot_window_start", mode="before")
+    @classmethod
+    def validate_window_start(cls, value: object) -> str:
+        """Accept HH:MM strings; reset invalid values to '22:00'."""
+        _HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+        if isinstance(value, str) and _HHMM_RE.match(value):
+            return value
+        logger.warning(
+            "Invalid HH:MM value for screenshot_window_start (%r) — resetting to '22:00'.",
+            value,
+        )
+        return "22:00"
+
+    @field_validator("screenshot_window_end", mode="before")
+    @classmethod
+    def validate_window_end(cls, value: object) -> str:
+        """Accept HH:MM strings; reset invalid values to '06:00'."""
+        _HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+        if isinstance(value, str) and _HHMM_RE.match(value):
+            return value
+        logger.warning(
+            "Invalid HH:MM value for screenshot_window_end (%r) — resetting to '06:00'.",
+            value,
+        )
+        return "06:00"
 
 
 def load_settings() -> Settings:

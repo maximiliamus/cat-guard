@@ -174,3 +174,26 @@ class TestPlatformBranches:
 
         # PYSTRAY_BACKEND should have been set during the call
         # (checked via os.environ side effect in tray.py)
+
+
+class TestNotifyError:
+    """T016 — tests for notify_error() tray balloon helper."""
+
+    def test_notify_calls_icon_notify_with_message_and_title(self):
+        """notify_error(icon, msg) must call icon.notify(msg, 'CatGuard')."""
+        from catguard.tray import notify_error
+
+        icon = MagicMock()
+        notify_error(icon, "Could not save screenshot: permission denied")
+        icon.notify.assert_called_once_with(
+            "Could not save screenshot: permission denied", "CatGuard"
+        )
+
+    def test_notify_swallows_exceptions(self):
+        """notify_error must not propagate exceptions raised by icon.notify()."""
+        from catguard.tray import notify_error
+
+        icon = MagicMock()
+        icon.notify.side_effect = RuntimeError("tray backend unavailable")
+        # Should not raise
+        notify_error(icon, "some error")

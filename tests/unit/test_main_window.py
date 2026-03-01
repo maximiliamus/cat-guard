@@ -193,6 +193,44 @@ class TestOnClose:
 # _show_no_source_message
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# T010a: _main_window_visible visibility flag
+# ---------------------------------------------------------------------------
+
+class TestMainWindowVisibilityFlag:
+    """T010a \u2014 _main_window_visible bool toggled by show_or_focus / _on_close."""
+
+    def test_show_or_focus_sets_visible_true(self, patched_tk):
+        """show_or_focus() must set root._main_window_visible = True."""
+        mw_mod, mock_tk, toplevel_inst, _ = patched_tk
+        root = _make_root()
+        win = mw_mod.MainWindow(root)
+        # Simulate startup default
+        root._main_window_visible = False
+        win.show_or_focus()
+        assert root._main_window_visible is True
+
+    def test_on_close_sets_visible_false(self, patched_tk):
+        """_on_close() must set root._main_window_visible = False."""
+        mw_mod, mock_tk, toplevel_inst, _ = patched_tk
+        root = _make_root()
+        win = mw_mod.MainWindow(root)
+        root._main_window_visible = True
+        win._on_close()
+        assert root._main_window_visible is False
+
+    def test_flag_toggles_correctly_on_show_then_close(self, patched_tk):
+        """Round-trip: show -> True, close -> False."""
+        mw_mod, mock_tk, toplevel_inst, _ = patched_tk
+        root = _make_root()
+        win = mw_mod.MainWindow(root)
+        root._main_window_visible = False
+        win.show_or_focus()
+        assert root._main_window_visible is True
+        win._on_close()
+        assert root._main_window_visible is False
+
+
 class TestNoSourceMessage:
     def test_creates_label_with_message(self, patched_tk):
         mw_mod, mock_tk, toplevel_inst, _ = patched_tk

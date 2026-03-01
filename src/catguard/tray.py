@@ -94,6 +94,17 @@ def build_tray_icon(
     return icon
 
 
+def notify_error(icon: pystray.Icon, message: str) -> None:
+    """Show a brief non-blocking tray balloon notification for save failures.
+
+    Swallows all exceptions so detection and audio are never interrupted.
+    """
+    try:
+        icon.notify(message, "CatGuard")
+    except Exception:
+        logger.warning("Could not show tray notification: %s", message)
+
+
 def _on_settings(root, settings: Settings, on_settings_saved: Callable) -> None:
     """Open the Settings window on the tkinter main thread."""
     from catguard.ui.settings_window import open_settings_window

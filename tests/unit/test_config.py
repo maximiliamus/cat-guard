@@ -18,7 +18,7 @@ class TestSettingsDefaults:
 
     def test_default_confidence_threshold(self):
         s = Settings()
-        assert s.confidence_threshold == 0.40
+        assert s.confidence_threshold == 0.25
 
     def test_default_cooldown_seconds(self):
         s = Settings()
@@ -99,6 +99,90 @@ class TestLoadSettings:
             word in caplog.text.lower()
             for word in ("default", "writing", "not found", "first")
         )
+
+
+# ---------------------------------------------------------------------------
+# T003: New screenshot-related Settings fields
+# ---------------------------------------------------------------------------
+
+class TestScreenshotSettingsDefaults:
+    """T003 — four new Settings fields with correct defaults (TDD RED before T005)."""
+
+    def test_screenshots_root_folder_default_is_empty_string(self):
+        s = Settings()
+        assert s.screenshots_root_folder == ""
+
+    def test_screenshot_window_enabled_default_is_false(self):
+        s = Settings()
+        assert s.screenshot_window_enabled is False
+
+    def test_screenshot_window_start_default(self):
+        s = Settings()
+        assert s.screenshot_window_start == "22:00"
+
+    def test_screenshot_window_end_default(self):
+        s = Settings()
+        assert s.screenshot_window_end == "06:00"
+
+
+class TestScreenshotSettingsAssignment:
+    """T003 — new fields accept valid values and persist through save/load."""
+
+    def test_screenshots_root_folder_accepts_path_string(self):
+        s = Settings(screenshots_root_folder="/some/path")
+        assert s.screenshots_root_folder == "/some/path"
+
+    def test_screenshot_window_enabled_can_be_set_true(self):
+        s = Settings(screenshot_window_enabled=True)
+        assert s.screenshot_window_enabled is True
+
+    def test_screenshot_window_start_accepts_valid_hhmm(self):
+        s = Settings(screenshot_window_start="08:30")
+        assert s.screenshot_window_start == "08:30"
+
+    def test_screenshot_window_end_accepts_valid_hhmm(self):
+        s = Settings(screenshot_window_end="23:59")
+        assert s.screenshot_window_end == "23:59"
+
+    def test_invalid_window_start_resets_to_default(self):
+        """Malformed HH:MM resets to the default value."""
+        s = Settings(screenshot_window_start="not-a-time")
+        assert s.screenshot_window_start == "22:00"
+
+    def test_invalid_window_end_resets_to_default(self):
+        s = Settings(screenshot_window_end="99:99")
+        assert s.screenshot_window_end == "06:00"
+
+
+class TestScreenshotSettingsRoundTrip:
+    """T003 — new fields survive a save → load round-trip."""
+
+    def test_screenshot_fields_round_trip(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        original = Settings(
+            screenshots_root_folder="/tmp/cats",
+            screenshot_window_enabled=True,
+            screenshot_window_start="21:00",
+            screenshot_window_end="07:00",
+        )
+        with patch("catguard.config._config_file", return_value=config_file):
+            save_settings(original)
+            loaded = load_settings()
+        assert loaded.screenshots_root_folder == "/tmp/cats"
+        assert loaded.screenshot_window_enabled is True
+        assert loaded.screenshot_window_start == "21:00"
+        assert loaded.screenshot_window_end == "07:00"
+
+    def test_legacy_settings_without_screenshot_fields_load_with_defaults(self, tmp_path):
+        """Existing settings.json without new fields loads without error."""
+        config_file = tmp_path / "settings.json"
+        legacy_data = {"camera_index": 1, "cooldown_seconds": 10.0}
+        config_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+        with patch("catguard.config._config_file", return_value=config_file):
+            loaded = load_settings()
+        assert loaded.camera_index == 1
+        assert loaded.screenshots_root_folder == ""
+        assert loaded.screenshot_window_enabled is False
 
 
 class TestSaveSettings:
