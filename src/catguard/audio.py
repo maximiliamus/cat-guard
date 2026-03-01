@@ -63,6 +63,59 @@ def play_random_alert(paths: list[str], default_path: Path) -> None:
         _play_async(str(default_path))
 
 
+def play_alert(settings, default_path: Path) -> None:
+    """Dispatch playback using the active PlaybackMode.
+
+    Priority: DEFAULT > PINNED > RANDOM
+
+    - DEFAULT: settings.use_default_sound is True → plays default_path.
+    - PINNED: use_default_sound is False AND pinned_sound is a valid existing file
+              → plays pinned_sound; falls back to RANDOM if file has since been removed.
+    - RANDOM: use_default_sound is False AND pinned_sound is '' or missing
+              → random from sound_library_paths; falls back to default_path if empty.
+
+    Logs which mode fired and why.
+    """
+    if settings.use_default_sound:
+        logger.info("play_alert: mode=DEFAULT — playing built-in default: %s", default_path)
+        _play_async(str(default_path))
+        return
+
+    pinned = settings.pinned_sound
+    if pinned:
+        if Path(pinned).is_file():
+            logger.info("play_alert: mode=PINNED — playing pinned sound: %s", pinned)
+            _play_async(pinned)
+            return
+        else:
+            logger.warning(
+                "play_alert: mode=PINNED — pinned file missing (%r); falling back to RANDOM.",
+                pinned,
+            )
+
+    # RANDOM mode
+    valid = [
+        p for p in settings.sound_library_paths
+        if Path(p).suffix.lower() in _SUPPORTED_FORMATS
+    ]
+    skipped = len(settings.sound_library_paths) - len(valid)
+    if skipped:
+        logger.warning("play_alert: skipped %d unsupported file(s) in library.", skipped)
+
+    if valid:
+        import random as _random
+        chosen = _random.choice(valid)
+        logger.info("play_alert: mode=RANDOM — playing: %s", chosen)
+        _play_async(chosen)
+    else:
+        logger.info(
+            "play_alert: mode=RANDOM — library empty or all invalid; "
+            "falling back to default: %s",
+            default_path,
+        )
+        _play_async(str(default_path))
+
+
 def _play_async(path: str) -> None:
     """Play *path* in a daemon background thread (non-blocking)."""
 

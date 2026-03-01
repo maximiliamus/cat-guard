@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -67,3 +68,122 @@ class TestAudioIntegration:
         shutdown_audio()
         # Re-initialise for teardown_method
         init_audio()
+
+
+# ---------------------------------------------------------------------------
+# T018: play_alert() mode dispatch — default-sound toggle persistence
+# ---------------------------------------------------------------------------
+
+@pytest.mark.integration
+class TestPlayAlertModeDispatchIntegration:
+    """T018 / T024 — end-to-end play_alert() mode selection with saved settings."""
+
+    def _make_settings(self, tmp_path, use_default_sound=True, pinned_sound="", library=None):
+        s = MagicMock()
+        s.use_default_sound = use_default_sound
+        s.pinned_sound = pinned_sound
+        s.sound_library_paths = library or []
+        return s
+
+    def test_use_default_sound_true_calls_play_async_with_default(self, tmp_path):
+        """T018: use_default_sound=True → _play_async receives default_path."""
+        from catguard.audio import play_alert
+
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = self._make_settings(tmp_path, use_default_sound=True)
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(default)]
+
+    def test_use_default_sound_false_with_library_plays_library(self, tmp_path):
+        """T018: use_default_sound=False → library sound is used."""
+        from catguard.audio import play_alert
+
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "lib.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = self._make_settings(
+            tmp_path,
+            use_default_sound=False,
+            library=[str(lib)],
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(lib)]
+
+    # T024: pinned-sound playback integration tests
+    def test_pinned_sound_always_plays_same_file(self, tmp_path):
+        """T024: pinned_sound set → play_alert always plays that file."""
+        from catguard.audio import play_alert
+
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        pinned = tmp_path / "pinned.wav"
+        pinned.write_bytes(b"\x00" * 44)
+        settings = self._make_settings(
+            tmp_path,
+            use_default_sound=False,
+            pinned_sound=str(pinned),
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            for _ in range(3):
+                play_alert(settings, default)
+
+        assert all(p == str(pinned) for p in played)
+        assert len(played) == 3
+
+    def test_pinned_sound_missing_falls_back_to_random(self, tmp_path):
+        """T024: pinned_sound path removed → fallback to random selection."""
+        from catguard.audio import play_alert
+
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "lib.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = self._make_settings(
+            tmp_path,
+            use_default_sound=False,
+            pinned_sound="/nonexistent/removed.wav",
+        )
+        settings.sound_library_paths = [str(lib)]
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(lib)]
+
+    def test_pinned_sound_empty_random_from_library(self, tmp_path):
+        """T024: pinned_sound='' → random selection from library."""
+        from catguard.audio import play_alert
+
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        files = []
+        for name in ["a.wav", "b.wav", "c.wav"]:
+            p = tmp_path / name
+            p.write_bytes(b"\x00" * 44)
+            files.append(str(p))
+        settings = self._make_settings(
+            tmp_path,
+            use_default_sound=False,
+            pinned_sound="",
+        )
+        settings.sound_library_paths = files
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            for _ in range(10):
+                play_alert(settings, default)
+
+        assert set(played).issubset(set(files))

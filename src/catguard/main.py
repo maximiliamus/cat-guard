@@ -20,7 +20,7 @@ def main() -> None:
     """Main entry point. Initializes all subsystems and starts the event loop."""
     import tkinter as tk
 
-    from catguard.audio import init_audio, play_random_alert, shutdown_audio
+    from catguard.audio import init_audio, play_alert, shutdown_audio
     from catguard.config import load_settings, save_settings
     from catguard.detection import DetectionEvent, DetectionLoop
     from catguard.screenshots import save_screenshot
@@ -49,6 +49,7 @@ def main() -> None:
     root = tk.Tk()
     root.withdraw()  # hide the root window; tray is the primary UI
     root._main_window_visible = False  # visibility flag read by save_screenshot
+    root._recording_event = threading.Event()  # set while mic recording is active
 
     # ------------------------------------------------------------------
     # 5. Detection (pull model: loop reads settings reference each frame)
@@ -64,7 +65,10 @@ def main() -> None:
             logger.warning("Screenshot error (tray not ready): %s", msg)
 
     def on_cat_detected(event: DetectionEvent) -> None:
-        play_random_alert(settings.sound_library_paths, default_sound)
+        if root._recording_event.is_set():
+            logger.debug("on_cat_detected: suppressed — recording in progress.")
+            return
+        play_alert(settings, default_sound)
         save_screenshot(
             event.frame_bgr,
             settings,

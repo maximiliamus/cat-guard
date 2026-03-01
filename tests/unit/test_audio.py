@@ -5,6 +5,7 @@ Covers:
 - Fallback to default when library empty or all invalid
 - Unsupported format filtering
 - init_audio / shutdown_audio call pygame.mixer
+- play_alert() mode dispatch: DEFAULT, PINNED, RANDOM, fallbacks
 """
 from __future__ import annotations
 
@@ -13,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from catguard.audio import init_audio, play_random_alert, shutdown_audio
+from catguard.audio import init_audio, play_alert, play_random_alert, shutdown_audio
 
 
 class TestRandomSelection:
@@ -125,3 +126,158 @@ class TestInitShutdown:
         with patch.object(mixer_mod, "quit") as mock_quit:
             shutdown_audio()
             mock_quit.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# T009: play_alert() mode dispatch
+# ---------------------------------------------------------------------------
+
+def _make_settings(
+    use_default_sound=True,
+    pinned_sound="",
+    sound_library_paths=None,
+):
+    """Build a minimal settings-like object for play_alert() tests."""
+    s = MagicMock()
+    s.use_default_sound = use_default_sound
+    s.pinned_sound = pinned_sound
+    s.sound_library_paths = sound_library_paths or []
+    return s
+
+
+class TestPlayAlertDefaultMode:
+    """use_default_sound=True → always plays default_path regardless of library."""
+
+    def test_plays_default_path(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=True)
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(default)]
+
+    def test_ignores_library_when_default_mode(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "lib.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = _make_settings(
+            use_default_sound=True,
+            sound_library_paths=[str(lib)],
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(default)]
+
+
+class TestPlayAlertPinnedMode:
+    """use_default_sound=False, valid pinned_sound → plays pinned file."""
+
+    def test_plays_pinned_file(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        pinned = tmp_path / "pinned.wav"
+        pinned.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=False, pinned_sound=str(pinned))
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(pinned)]
+
+    def test_pinned_missing_falls_back_to_random(self, tmp_path):
+        """If pinned file is missing, fall back to RANDOM mode."""
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "lib.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="/nonexistent/missing.wav",
+            sound_library_paths=[str(lib)],
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(lib)]
+
+
+class TestPlayAlertRandomMode:
+    """use_default_sound=False, pinned_sound='' → random from library."""
+
+    def test_plays_from_library(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "lib.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="",
+            sound_library_paths=[str(lib)],
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(lib)]
+
+    def test_empty_library_falls_back_to_default(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=False, pinned_sound="")
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(default)]
+
+    def test_all_unsupported_library_falls_back_to_default(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        bad = tmp_path / "sound.ogg"
+        bad.write_bytes(b"\x00" * 10)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="",
+            sound_library_paths=[str(bad)],
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            play_alert(settings, default)
+
+        assert played == [str(default)]
+
+    def test_random_selects_from_library(self, tmp_path):
+        """Over many calls, random mode selects from the library."""
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        files = []
+        for name in ["a.wav", "b.wav", "c.wav"]:
+            p = tmp_path / name
+            p.write_bytes(b"\x00" * 44)
+            files.append(str(p))
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="",
+            sound_library_paths=files,
+        )
+
+        played = []
+        with patch("catguard.audio._play_async", side_effect=played.append):
+            for _ in range(20):
+                play_alert(settings, default)
+
+        assert set(played).issubset(set(files))
+

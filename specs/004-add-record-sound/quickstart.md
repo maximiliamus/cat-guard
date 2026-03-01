@@ -66,11 +66,15 @@ pytest -m "not integration"
 |------|--------|
 | `src/catguard/recording.py` | **NEW** — `Recorder`, `get_alerts_dir()`, `save_recording()`, `open_alerts_folder()` |
 | `src/catguard/audio.py` | **MODIFY** — add `play_alert(settings, default_path)` dispatcher |
-| `src/catguard/config.py` | **MODIFY** — add `use_default_sound` and `pinned_sound` to `Settings` and `SettingsFormModel` |
+| `src/catguard/config.py` | **MODIFY** — add `use_default_sound` and `pinned_sound` fields to `Settings` |
+| `src/catguard/ui/settings_window.py` | **MODIFY** — extend `SettingsFormModel`; Record button, checkbox, dropdown, alerts folder row |
 | `src/catguard/main.py` | **MODIFY** — call `play_alert()`, initialise `root._recording_event` |
-| `src/catguard/ui/settings_window.py` | **MODIFY** — Record button, checkbox, dropdown, alerts folder row |
 | `tests/unit/test_recording.py` | **NEW** |
+| `tests/unit/test_audio.py` | **EXTEND** — `play_alert()` mode dispatch tests |
+| `tests/unit/test_config.py` | **EXTEND** — new `Settings` fields tests |
+| `tests/unit/test_settings_window.py` | **EXTEND** — `SettingsFormModel` audio fields + dropdown logic |
 | `tests/integration/test_recording_integration.py` | **NEW** |
+| `tests/integration/test_audio_integration.py` | **EXTEND** — mode dispatch integration tests |
 
 ---
 

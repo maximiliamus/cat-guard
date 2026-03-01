@@ -145,3 +145,108 @@ class TestSettingsFormModelTimeWindow:
         assert model.screenshot_window_enabled is False
         assert model.screenshot_window_start == "22:00"
         assert model.screenshot_window_end == "06:00"
+
+
+# ---------------------------------------------------------------------------
+# T005: SettingsFormModel audio playback fields (use_default_sound, pinned_sound)
+# ---------------------------------------------------------------------------
+
+class TestSettingsFormModelAudioFields:
+    """T005 — use_default_sound and pinned_sound round-trip through SettingsFormModel."""
+
+    def test_from_settings_populates_use_default_sound_true(self):
+        s = Settings(use_default_sound=True)
+        model = SettingsFormModel.from_settings(s)
+        assert model.use_default_sound is True
+
+    def test_from_settings_populates_use_default_sound_false(self):
+        s = Settings(use_default_sound=False)
+        model = SettingsFormModel.from_settings(s)
+        assert model.use_default_sound is False
+
+    def test_from_settings_populates_pinned_sound_empty(self):
+        s = Settings(pinned_sound="")
+        model = SettingsFormModel.from_settings(s)
+        assert model.pinned_sound == ""
+
+    def test_from_settings_populates_pinned_sound_path(self, tmp_path):
+        wav = tmp_path / "alert.wav"
+        wav.write_bytes(b"\x00" * 44)
+        s = Settings(pinned_sound=str(wav))
+        model = SettingsFormModel.from_settings(s)
+        assert model.pinned_sound == str(wav)
+
+    def test_to_settings_round_trip_use_default_sound_false(self):
+        model = SettingsFormModel.from_settings(Settings(use_default_sound=False))
+        restored = model.to_settings()
+        assert restored.use_default_sound is False
+
+    def test_to_settings_round_trip_use_default_sound_true(self):
+        model = SettingsFormModel.from_settings(Settings(use_default_sound=True))
+        restored = model.to_settings()
+        assert restored.use_default_sound is True
+
+    def test_to_settings_round_trip_pinned_sound(self, tmp_path):
+        wav = tmp_path / "sound.wav"
+        wav.write_bytes(b"\x00" * 44)
+        model = SettingsFormModel.from_settings(Settings(pinned_sound=str(wav)))
+        restored = model.to_settings()
+        assert restored.pinned_sound == str(wav)
+
+    def test_to_settings_round_trip_pinned_sound_empty(self):
+        model = SettingsFormModel.from_settings(Settings(pinned_sound=""))
+        restored = model.to_settings()
+        assert restored.pinned_sound == ""
+
+    def test_default_audio_fields(self):
+        model = SettingsFormModel.from_settings(Settings())
+        assert model.use_default_sound is True
+        assert model.pinned_sound == ""
+
+
+# ---------------------------------------------------------------------------
+# T017: Checkbox enable/disable interaction — SettingsFormModel logic
+# ---------------------------------------------------------------------------
+
+class TestAudioDropdownLogic:
+    """T017 / T023 — dropdown disable logic via SettingsFormModel."""
+
+    def test_use_default_sound_true_disables_dropdown_logic(self):
+        """When use_default_sound=True, to_settings() produces use_default_sound=True."""
+        model = SettingsFormModel.from_settings(Settings(use_default_sound=True))
+        s = model.to_settings()
+        assert s.use_default_sound is True
+
+    def test_use_default_sound_false_enables_dropdown_logic(self):
+        """When use_default_sound=False, to_settings() propagates False."""
+        model = SettingsFormModel.from_settings(Settings(use_default_sound=False))
+        s = model.to_settings()
+        assert s.use_default_sound is False
+
+    def test_pinned_sound_empty_maps_to_all(self):
+        """Empty pinned_sound maps to 'All' convention (empty string)."""
+        model = SettingsFormModel.from_settings(Settings(pinned_sound=""))
+        assert model.pinned_sound == ""
+        s = model.to_settings()
+        assert s.pinned_sound == ""
+
+    def test_specific_path_round_trips(self, tmp_path):
+        """A specific path for pinned_sound round-trips through to_settings()."""
+        wav = tmp_path / "specific.wav"
+        wav.write_bytes(b"\x00" * 44)
+        model = SettingsFormModel.from_settings(Settings(pinned_sound=str(wav)))
+        s = model.to_settings()
+        assert s.pinned_sound == str(wav)
+
+    def test_use_default_sound_true_serialised_correctly(self):
+        """use_default_sound=True serialises to Settings.use_default_sound=True."""
+        model = SettingsFormModel(use_default_sound=True, pinned_sound="")
+        s = model.to_settings()
+        assert s.use_default_sound is True
+
+    def test_use_default_sound_false_serialised_correctly(self):
+        model = SettingsFormModel(use_default_sound=False, pinned_sound="")
+        s = model.to_settings()
+        assert s.use_default_sound is False
+
+
