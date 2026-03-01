@@ -1,0 +1,1 @@
+- After sleep mode camera is not restored if app was launched before.
