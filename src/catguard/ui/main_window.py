@@ -56,6 +56,7 @@ class MainWindow:
 
     def show_or_focus(self) -> None:
         """Make the window visible; if already visible, bring it to front."""
+        self._root._main_window_visible = True
         self._window.deiconify()
         self._window.lift()
         self._window.focus_force()
@@ -134,6 +135,7 @@ class MainWindow:
     def _on_close(self) -> None:
         """Destroy the window and clear the reference on root."""
         logger.info("MainWindow closed.")
+        self._root._main_window_visible = False
         self._closed = True  # guard: drop any update_frame callbacks still queued
         if self._on_close_extra is not None:
             try:

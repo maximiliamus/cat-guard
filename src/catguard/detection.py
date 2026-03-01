@@ -51,6 +51,13 @@ class DetectionEvent:
     confidence: float
     action: DetectionAction
     sound_file: Optional[str] = None
+    frame_bgr: Optional["np.ndarray"] = None
+    """Raw BGR camera frame captured at the moment of detection.
+
+    Set only for ``SOUND_PLAYED`` events so the screenshot module can save it
+    without a second capture. ``None`` for ``COOLDOWN_SUPPRESSED`` events.
+    Never written to disk; lives only for the duration of the callback.
+    """
 
 
 @dataclass
@@ -241,6 +248,7 @@ class DetectionLoop:
                                 timestamp=now,
                                 confidence=confidence,
                                 action=DetectionAction.SOUND_PLAYED,
+                                frame_bgr=frame,
                             )
                             logger.info(
                                 "Cat detected (conf=%.2f) — ALERTING", confidence

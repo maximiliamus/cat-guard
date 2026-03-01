@@ -19,7 +19,7 @@
 
 **Purpose**: Create the new module stub so all subsequent test and implementation tasks have a stable import target.
 
-- [ ] T001 Create empty `src/catguard/screenshots.py` stub (module docstring + placeholder `pass`; no logic yet)
+- [X] T001 Create empty `src/catguard/screenshots.py` stub (module docstring + placeholder `pass`; no logic yet)
 
 ---
 
@@ -29,10 +29,10 @@
 
 **⚠️ CRITICAL**: No user story work can begin until T002–T005 are complete.
 
-- [ ] T002 [P] Write failing unit tests for `DetectionEvent.frame_bgr` optional field in `tests/unit/test_detection.py`
-- [ ] T003 [P] Write failing unit tests for 4 new Settings fields (`screenshots_root_folder`, `screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end`) in `tests/unit/test_config.py`
-- [ ] T004 [P] Add `frame_bgr: Optional[np.ndarray] = None` field to `DetectionEvent` dataclass in `src/catguard/detection.py` (makes T002 pass)
-- [ ] T005 [P] Add 4 new screenshot fields to `Settings` model with defaults and `HH:MM` validator in `src/catguard/config.py` (makes T003 pass)
+- [X] T002 [P] Write failing unit tests for `DetectionEvent.frame_bgr` optional field in `tests/unit/test_detection.py`
+- [X] T003 [P] Write failing unit tests for 4 new Settings fields (`screenshots_root_folder`, `screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end`) in `tests/unit/test_config.py`
+- [X] T004 [P] Add `frame_bgr: Optional[np.ndarray] = None` field to `DetectionEvent` dataclass in `src/catguard/detection.py` (makes T002 pass)
+- [X] T005 [P] Add 4 new screenshot fields to `Settings` model with defaults and `HH:MM` validator in `src/catguard/config.py` (makes T003 pass)
 
 **Checkpoint**: `pytest tests/unit/test_detection.py tests/unit/test_config.py` passes — user story work can now begin.
 
@@ -48,16 +48,16 @@
 
 > **Write FIRST — all tests must FAIL before implementation begins**
 
-- [ ] T006 [P] [US1] Write failing unit tests for `resolve_root()`, `build_filepath()`, and core `save_screenshot()` path (happy path + same-second collision) in `tests/unit/test_screenshots.py`
-- [ ] T007 [P] [US1] Write failing integration test verifying a real `.jpg` file is created on disk for a synthetic detection event in `tests/integration/test_screenshot_integration.py`
-- [ ] T010a [P] [US1] Write failing unit tests for `_main_window_visible` toggling in `tests/unit/test_main_window.py` — verify `show_or_focus()` sets the attribute to `True` and `_on_close()` sets it to `False`
+- [X] T006 [P] [US1] Write failing unit tests for `resolve_root()`, `build_filepath()`, and core `save_screenshot()` path (happy path + same-second collision) in `tests/unit/test_screenshots.py`
+- [X] T007 [P] [US1] Write failing integration test verifying a real `.jpg` file is created on disk for a synthetic detection event in `tests/integration/test_screenshot_integration.py`
+- [X] T010a [P] [US1] Write failing unit tests for `_main_window_visible` toggling in `tests/unit/test_main_window.py` — verify `show_or_focus()` sets the attribute to `True` and `_on_close()` sets it to `False`
 
 ### Implementation for User Story 1
 
-- [ ] T008 [US1] Implement `resolve_root()` (default `Pictures/CatGuard` via `platformdirs.user_pictures_dir()`), `build_filepath()` (date folder + `HH-MM-SS[-N].jpg` collision-safe naming), and core `save_screenshot()` skeleton (no error handling yet, no time-window check yet) in `src/catguard/screenshots.py`
-- [ ] T009 [P] [US1] Pass `frame_bgr=frame` to `DetectionEvent` for `SOUND_PLAYED` events in `DetectionLoop._run()` in `src/catguard/detection.py`
-- [ ] T010 [P] [US1] Set `root._main_window_visible = False` at startup and toggle it to `True`/`False` in `MainWindow.show_or_focus()` and `MainWindow._on_close()` in `src/catguard/ui/main_window.py` ← after T010a
-- [ ] T011 [US1] Wire `save_screenshot()` into `on_cat_detected()` in `src/catguard/main.py`: pass `is_window_open=lambda: getattr(root, "_main_window_visible", False)` and a no-op `on_error` placeholder; depends on T008, T009, T010
+- [X] T008 [US1] Implement `resolve_root()` (default `Pictures/CatGuard` via `platformdirs.user_pictures_dir()`), `build_filepath()` (date folder + `HH-MM-SS[-N].jpg` collision-safe naming), and core `save_screenshot()` skeleton (no error handling yet, no time-window check yet) in `src/catguard/screenshots.py`
+- [X] T009 [P] [US1] Pass `frame_bgr=frame` to `DetectionEvent` for `SOUND_PLAYED` events in `DetectionLoop._run()` in `src/catguard/detection.py`
+- [X] T010 [P] [US1] Set `root._main_window_visible = False` at startup and toggle it to `True`/`False` in `MainWindow.show_or_focus()` and `MainWindow._on_close()` in `src/catguard/ui/main_window.py` ← after T010a
+- [X] T011 [US1] Wire `save_screenshot()` into `on_cat_detected()` in `src/catguard/main.py`: pass `is_window_open=lambda: getattr(root, "_main_window_visible", False)` and a no-op `on_error` placeholder; depends on T008, T009, T010
 
 **Checkpoint**: `pytest tests/unit/test_screenshots.py tests/integration/test_screenshot_integration.py` passes. Run [quickstart.md](quickstart.md) steps 3–4 manually.
 
@@ -73,12 +73,12 @@
 
 > **Write FIRST — tests must FAIL before implementation begins**
 
-- [ ] T012 [P] [US2] Write failing unit tests for `SettingsFormModel.screenshots_root_folder` field (`from_settings`, `to_settings`, round-trip) in `tests/unit/test_settings_window.py`
+- [X] T012 [P] [US2] Write failing unit tests for `SettingsFormModel.screenshots_root_folder` field (`from_settings`, `to_settings`, round-trip) in `tests/unit/test_settings_window.py`
 
 ### Implementation for User Story 2
 
-- [ ] T013 [US2] Add `screenshots_root_folder: str` field to `SettingsFormModel.from_settings()` and `to_settings()` in `src/catguard/ui/settings_window.py` (makes T012 pass)
-- [ ] T014 [US2] Add **Screenshots** section to `open_settings_window()` in `src/catguard/ui/settings_window.py`: read-only entry showing the resolved effective path, **Browse…** folder-picker button, and a note showing the OS default when the field is empty; wire to `model.screenshots_root_folder`
+- [X] T013 [US2] Add `screenshots_root_folder: str` field to `SettingsFormModel.from_settings()` and `to_settings()` in `src/catguard/ui/settings_window.py` (makes T012 pass)
+- [X] T014 [US2] Add **Screenshots** section to `open_settings_window()` in `src/catguard/ui/settings_window.py`: read-only entry showing the resolved effective path, **Browse…** folder-picker button, and a note showing the OS default when the field is empty; wire to `model.screenshots_root_folder`
 
 **Checkpoint**: Open Settings → change root folder → save → trigger detection → screenshot appears in new folder.
 
@@ -94,14 +94,14 @@
 
 > **Write FIRST — tests must FAIL before implementation begins**
 
-- [ ] T015 [P] [US3] Write failing unit tests for `save_screenshot()` error paths (`OSError`, `cv2` encoding failure) — verify `on_error` callback is invoked and exception does not propagate in `tests/unit/test_screenshots.py`
-- [ ] T016 [P] [US3] Write failing unit test for `notify_error()` tray helper (verify `icon.notify()` is called with the correct message) in `tests/unit/test_tray.py`
+- [X] T015 [P] [US3] Write failing unit tests for `save_screenshot()` error paths (`OSError`, `cv2` encoding failure) — verify `on_error` callback is invoked and exception does not propagate in `tests/unit/test_screenshots.py`
+- [X] T016 [P] [US3] Write failing unit test for `notify_error()` tray helper (verify `icon.notify()` is called with the correct message) in `tests/unit/test_tray.py`
 
 ### Implementation for User Story 3
 
-- [ ] T017 [US3] Add `notify_error(icon, message: str)` helper to `src/catguard/tray.py` — calls `icon.notify(message, "CatGuard")` (makes T016 pass)
-- [ ] T018 [US3] Wrap the JPEG-write block in `save_screenshot()` with `try/except`; on failure call `logger.error(...)` and `on_error(msg)` in `src/catguard/screenshots.py` (makes T015 pass)
-- [ ] T019 [US3] Replace the no-op `on_error` placeholder in `main.py` with `lambda msg: notify_error(tray_icon, msg)`; pass `tray_icon` reference into `on_cat_detected` in `src/catguard/main.py`
+- [X] T017 [US3] Add `notify_error(icon, message: str)` helper to `src/catguard/tray.py` — calls `icon.notify(message, "CatGuard")` (makes T016 pass)
+- [X] T018 [US3] Wrap the JPEG-write block in `save_screenshot()` with `try/except`; on failure call `logger.error(...)` and `on_error(msg)` in `src/catguard/screenshots.py` (makes T015 pass)
+- [X] T019 [US3] Replace the no-op `on_error` placeholder in `main.py` with `lambda msg: notify_error(tray_icon, msg)`; pass `tray_icon` reference into `on_cat_detected` in `src/catguard/main.py`
 
 **Checkpoint**: `pytest tests/unit/test_screenshots.py tests/unit/test_tray.py` passes. Run [quickstart.md](quickstart.md) step 7 manually.
 
@@ -117,15 +117,15 @@
 
 > **Write FIRST — tests must FAIL before implementation begins**
 
-- [ ] T020 [P] [US4] Write failing unit tests for `is_within_time_window()` covering: window disabled, same-day range (inside/outside), midnight-spanning range (inside/outside at 23:30/14:00), and degenerate equal-times case in `tests/unit/test_screenshots.py`
-- [ ] T021 [P] [US4] Write failing unit tests for `SettingsFormModel` time-window fields (`screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end` — `from_settings`, `to_settings`, round-trip) in `tests/unit/test_settings_window.py`
+- [X] T020 [P] [US4] Write failing unit tests for `is_within_time_window()` covering: window disabled, same-day range (inside/outside), midnight-spanning range (inside/outside at 23:30/14:00), and degenerate equal-times case in `tests/unit/test_screenshots.py`
+- [X] T021 [P] [US4] Write failing unit tests for `SettingsFormModel` time-window fields (`screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end` — `from_settings`, `to_settings`, round-trip) in `tests/unit/test_settings_window.py`
 
 ### Implementation for User Story 4
 
-- [ ] T022 [US4] Implement `is_within_time_window(settings) -> bool` in `src/catguard/screenshots.py`: parse `HH:MM`, handle same-day and midnight-spanning ranges, degenerate equal-times case with log warning (makes T020 pass)
-- [ ] T023 [US4] Add `screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end` to `SettingsFormModel.from_settings()` and `to_settings()` in `src/catguard/ui/settings_window.py` (makes T021 pass)
-- [ ] T024 [US4] Add time-window subsection to **Screenshots** section in `open_settings_window()` in `src/catguard/ui/settings_window.py`: checkbox (`screenshot_window_enabled`), two `HH:MM` spinboxes (start/end) that enable/disable with the checkbox state; wire to model fields
-- [ ] T025 [US4] Add `is_within_time_window(settings)` guard to `save_screenshot()` in `src/catguard/screenshots.py` — return early (no file, no error) when outside the window (makes full T020 integration pass)
+- [X] T022 [US4] Implement `is_within_time_window(settings) -> bool` in `src/catguard/screenshots.py`: parse `HH:MM`, handle same-day and midnight-spanning ranges, degenerate equal-times case with log warning (makes T020 pass)
+- [X] T023 [US4] Add `screenshot_window_enabled`, `screenshot_window_start`, `screenshot_window_end` to `SettingsFormModel.from_settings()` and `to_settings()` in `src/catguard/ui/settings_window.py` (makes T021 pass)
+- [X] T024 [US4] Add time-window subsection to **Screenshots** section in `open_settings_window()` in `src/catguard/ui/settings_window.py`: checkbox (`screenshot_window_enabled`), two `HH:MM` spinboxes (start/end) that enable/disable with the checkbox state; wire to model fields
+- [X] T025 [US4] Add `is_within_time_window(settings)` guard to `save_screenshot()` in `src/catguard/screenshots.py` — return early (no file, no error) when outside the window (makes full T020 integration pass)
 
 **Checkpoint**: `pytest tests/unit/test_screenshots.py tests/unit/test_settings_window.py` passes. Run [quickstart.md](quickstart.md) steps 6–7 manually.
 
@@ -133,9 +133,9 @@
 
 ## Final Phase: Polish & Cross-Cutting Concerns
 
-- [ ] T026 [P] Run full test suite and fix any regressions: `pytest` (all unit + integration)
-- [ ] T027 [P] Verify [contracts/config.md](contracts/config.md) schema v1.1 matches actual `Settings` fields in `src/catguard/config.py` (field names, types, defaults, constraints)
-- [ ] T028 Run complete [quickstart.md](quickstart.md) manual validation (all 7 steps)
+- [X] T026 [P] Run full test suite and fix any regressions: `pytest` (all unit + integration)
+- [X] T027 [P] Verify [contracts/config.md](contracts/config.md) schema v1.1 matches actual `Settings` fields in `src/catguard/config.py` (field names, types, defaults, constraints)
+- [X] T028 Run complete [quickstart.md](quickstart.md) manual validation (all 7 steps)
 
 ---
 

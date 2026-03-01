@@ -133,7 +133,7 @@ class TestNoDetectionPath:
 class TestListCameras:
     def test_returns_available_cameras(self):
         with patch("cv2.VideoCapture") as mock_cap_cls:
-            def side_effect(index):
+            def side_effect(index, *args):  # *args absorbs CAP_DSHOW on Windows
                 m = MagicMock()
                 m.isOpened.return_value = index < 2
                 return m
@@ -173,3 +173,55 @@ class TestDetectionEventModel:
             action=DetectionAction.COOLDOWN_SUPPRESSED,
         )
         assert event.action == DetectionAction.COOLDOWN_SUPPRESSED
+
+
+# ---------------------------------------------------------------------------
+# T002: DetectionEvent.frame_bgr optional field
+# ---------------------------------------------------------------------------
+
+class TestDetectionEventFrameBgr:
+    """T002 — frame_bgr field added to DetectionEvent (TDD RED before T004)."""
+
+    def test_frame_bgr_defaults_to_none(self):
+        """field exists and defaults to None when not supplied."""
+        import numpy as np
+        event = DetectionEvent(
+            timestamp=datetime.now(timezone.utc),
+            confidence=0.85,
+            action=DetectionAction.SOUND_PLAYED,
+        )
+        assert event.frame_bgr is None
+
+    def test_frame_bgr_can_be_set_to_ndarray(self):
+        """frame_bgr accepts a numpy ndarray."""
+        import numpy as np
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        event = DetectionEvent(
+            timestamp=datetime.now(timezone.utc),
+            confidence=0.85,
+            action=DetectionAction.SOUND_PLAYED,
+            frame_bgr=frame,
+        )
+        assert event.frame_bgr is frame
+
+    def test_cooldown_suppressed_event_frame_is_none(self):
+        """COOLDOWN_SUPPRESSED events carry no frame (no screenshot needed)."""
+        event = DetectionEvent(
+            timestamp=datetime.now(timezone.utc),
+            confidence=0.85,
+            action=DetectionAction.COOLDOWN_SUPPRESSED,
+        )
+        assert event.frame_bgr is None
+
+    def test_sound_played_event_accepts_frame(self):
+        """SOUND_PLAYED event correctly stores the supplied frame."""
+        import numpy as np
+        frame = np.ones((240, 320, 3), dtype=np.uint8) * 128
+        event = DetectionEvent(
+            timestamp=datetime.now(timezone.utc),
+            confidence=0.9,
+            action=DetectionAction.SOUND_PLAYED,
+            frame_bgr=frame,
+        )
+        assert event.frame_bgr is not None
+        assert event.frame_bgr.shape == (240, 320, 3)
