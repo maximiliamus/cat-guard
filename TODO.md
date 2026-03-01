@@ -1,0 +1,7 @@
+- After sleep mode camera is not restored if app was launched before.
+- It time window specififed then camera should be enabled only in than time.
+- Make Settings window resizable.
+- Rework settings window.
+- Help description for each setting. Open by icon (i) clicking.
+- Re-arrange menu items: Open, Settings, Exit
+- Remove Default root folder text. Just draw default folder in edit box.

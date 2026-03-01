@@ -5,6 +5,8 @@ pystray>=0.19.4
 Pillow>=10.0.0
 pygame-ce>=2.5.0
 pywin32>=306; sys_platform=="win32"
+sounddevice>=0.4.6
+soundfile>=0.12.1
 
 # Dev / test
 pytest>=8.0.0

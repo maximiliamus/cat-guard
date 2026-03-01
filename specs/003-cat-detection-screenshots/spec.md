@@ -14,6 +14,7 @@
 - Q: How should the time-of-day restriction for screenshots be configured? → A: A single daily time window (start + end time, may span midnight) with an enable/disable checkbox; when disabled, screenshots are taken at any hour.
 - Q: What image format should screenshots be saved in? → A: JPEG fixed, with maximum compression to minimise disk usage.
 - Q: Should the app automatically delete old screenshots after a retention period? → A: No — screenshots accumulate indefinitely; cleanup is the user's responsibility.
+- Q: Should the screenshots root folder path in Settings also have a "Browse..." button to open the configured folder in the file explorer? → A: Yes.
 
 ## Assumptions
 
@@ -61,6 +62,7 @@ A user can set the root folder where all detection screenshots are stored via th
 2. **Given** a root folder is saved in settings, **When** the app restarts, **Then** the same root folder is still configured and used for new screenshots.
 3. **Given** no root folder has been set by the user, **When** the app starts for the first time with this feature, **Then** the default `CatGuard` folder inside the system Pictures directory is used automatically — no configuration or setup is required.
 4. **Given** the configured root folder (or any of its sub-folders) does not yet exist, **When** the first detection event occurs, **Then** the app creates all missing folders at that moment and saves the screenshot successfully.
+5. **Given** the Settings window is open, **When** the user clicks the "Browse..." button next to the screenshots root folder path, **Then** the OS file explorer opens showing the contents of the currently configured root folder.
 
 ---
 
@@ -120,7 +122,7 @@ A user wants screenshots to be saved only during certain hours (e.g., at night).
 - **FR-004**: If multiple detections occur within the same second, the app MUST ensure file names are unique (e.g., by appending a counter).
 - **FR-005**: The app MUST create any missing intermediate folders (root folder, `CatGuard` sub-folder, and/or date sub-folder) on-demand at the moment the first screenshot is saved — not at app startup.
 - **FR-006**: The Settings window MUST include a field where the user can view and change the screenshots root folder path.
-- **FR-007**: The Settings window MUST provide a folder-picker control so the user can browse for the root folder without typing a path manually.
+- **FR-007**: The Settings window MUST place a "Browse..." button on the same line as the root folder path field; clicking it MUST open an OS folder-picker dialog so the user can select the root folder without typing a path manually.
 - **FR-008**: The configured root folder path MUST be persisted in the application settings and survive app restarts.
 - **FR-009**: When no root folder has been explicitly configured, the app MUST default to a `CatGuard` sub-folder inside the user's standard Pictures directory. This default MUST be resolved at runtime for the current user and operating system.
 - **FR-010**: If saving a screenshot fails for any reason, the app MUST continue operating normally (sound plays, detection continues), MUST log the error, and MUST display a brief non-blocking OS tray balloon/toast notification describing the failure.
@@ -130,6 +132,7 @@ A user wants screenshots to be saved only during certain hours (e.g., at night).
 - **FR-015**: The app MUST NOT save a screenshot if the time window is enabled and the current wall-clock time falls outside the configured window. The alert sound is unaffected by this restriction.
 - **FR-016**: The time window enable-state, start time, and end time MUST be persisted in application settings and restored on restart.
 - **FR-017**: Screenshots MUST be saved in JPEG format with maximum compression. The format and compression level are fixed and MUST NOT be exposed as user-configurable settings.
+- **FR-018**: The Settings window MUST include a "Browse..." button on the same line as the screenshots root folder path field; clicking it MUST open the configured root folder in the OS file explorer.
 
 ### Key Entities
 

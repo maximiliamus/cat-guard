@@ -208,3 +208,77 @@ class TestSaveSettings:
         with patch("catguard.config._config_file", return_value=config_file):
             save_settings(Settings())
         assert config_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# T003: New audio playback Settings fields (use_default_sound, pinned_sound)
+# ---------------------------------------------------------------------------
+
+class TestAudioSettingsDefaults:
+    """T003 — new audio fields have correct defaults."""
+
+    def test_use_default_sound_default_is_true(self):
+        s = Settings()
+        assert s.use_default_sound is True
+
+    def test_pinned_sound_default_is_empty_string(self):
+        s = Settings()
+        assert s.pinned_sound == ""
+
+
+class TestAudioSettingsAssignment:
+    """T003 — new audio fields accept valid values."""
+
+    def test_use_default_sound_can_be_set_false(self):
+        s = Settings(use_default_sound=False)
+        assert s.use_default_sound is False
+
+    def test_pinned_sound_accepts_existing_path(self, tmp_path):
+        wav = tmp_path / "alert.wav"
+        wav.write_bytes(b"\x00" * 44)
+        s = Settings(pinned_sound=str(wav))
+        assert s.pinned_sound == str(wav)
+
+    def test_stale_pinned_sound_reset_to_empty(self):
+        """pinned_sound validator resets stale path to '' (like prune_stale_paths)."""
+        s = Settings(pinned_sound="/nonexistent/path/sound.wav")
+        assert s.pinned_sound == ""
+
+    def test_empty_pinned_sound_stays_empty(self):
+        s = Settings(pinned_sound="")
+        assert s.pinned_sound == ""
+
+
+class TestAudioSettingsRoundTrip:
+    """T003 — new audio fields survive a save → load round-trip."""
+
+    def test_audio_fields_round_trip(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        wav = tmp_path / "alert.wav"
+        wav.write_bytes(b"\x00" * 44)
+        original = Settings(use_default_sound=False, pinned_sound=str(wav))
+        with patch("catguard.config._config_file", return_value=config_file):
+            save_settings(original)
+            loaded = load_settings()
+        assert loaded.use_default_sound is False
+        assert loaded.pinned_sound == str(wav)
+
+    def test_use_default_sound_true_round_trip(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        original = Settings(use_default_sound=True)
+        with patch("catguard.config._config_file", return_value=config_file):
+            save_settings(original)
+            loaded = load_settings()
+        assert loaded.use_default_sound is True
+
+    def test_legacy_settings_without_audio_fields_load_with_defaults(self, tmp_path):
+        """Existing settings.json without new audio fields loads without error."""
+        config_file = tmp_path / "settings.json"
+        legacy_data = {"camera_index": 1, "cooldown_seconds": 10.0}
+        config_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+        with patch("catguard.config._config_file", return_value=config_file):
+            loaded = load_settings()
+        assert loaded.camera_index == 1
+        assert loaded.use_default_sound is True
+        assert loaded.pinned_sound == ""
+

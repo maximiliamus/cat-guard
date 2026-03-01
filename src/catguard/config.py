@@ -90,6 +90,32 @@ class Settings(BaseModel):
             "May precede start to span midnight."
         ),
     )
+    use_default_sound: bool = Field(
+        default=True,
+        description=(
+            "When True, the built-in default sound plays on every detection event, "
+            "regardless of sound_library_paths and pinned_sound."
+        ),
+    )
+    pinned_sound: str = Field(
+        default="",
+        description=(
+            "Absolute path to the specific library sound to always play. "
+            "Empty string means random selection from sound_library_paths."
+        ),
+    )
+
+    @field_validator("pinned_sound")
+    @classmethod
+    def reset_stale_pinned_sound(cls, path: str) -> str:
+        """Silently reset pinned_sound to '' if the file no longer exists."""
+        if path and not Path(path).is_file():
+            logger.warning(
+                "pinned_sound path no longer exists (%r) — resetting to empty.",
+                path,
+            )
+            return ""
+        return path
 
     @field_validator("sound_library_paths")
     @classmethod
