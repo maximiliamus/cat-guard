@@ -40,5 +40,6 @@ On first run, CatGuard will:
 
 # Development
 
+- AI-driven
+- Spec-driven with [Spec Kit](https://github.com/github/spec-kit)
 - Cross-platform
-- SpecKit Flow
