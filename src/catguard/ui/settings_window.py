@@ -221,10 +221,19 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
                     pinned_var.set("All")
             _refresh_sound_combobox()
 
+    def _play_selected():
+        sel = path_listbox.curselection()
+        if not sel:
+            return
+        path = path_listbox.get(sel[0])
+        from catguard.audio import _play_async
+        _play_async(path)
+
     btn_frame = tk.Frame(win)
     btn_frame.grid(row=4, column=1, sticky="w", **pad)
     tk.Button(btn_frame, text="Add…", command=_add_path).pack(side="left", padx=2)
     tk.Button(btn_frame, text="Remove", command=_remove_path).pack(side="left", padx=2)
+    tk.Button(btn_frame, text="▶ Play", command=_play_selected).pack(side="left", padx=2)
 
     # ---- Sound Alerts section ------------------------------------------
     tk.Label(win, text="Sound Alerts:", font=(None, 9, "bold")).grid(

@@ -16,14 +16,37 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _monitor_playback_done(on_done: "Callable") -> None:
+    """Start a daemon thread that waits for pygame playback to finish.
+
+    Calls *on_done* once ``pygame.mixer.get_busy()`` returns False.
+    Silently no-ops if pygame is unavailable.
+    """
+    def _worker() -> None:
+        import time
+        try:
+            import pygame.mixer
+            time.sleep(0.15)  # let the sound start before polling
+            while pygame.mixer.get_busy():
+                time.sleep(0.1)
+        except Exception:
+            logger.debug("_monitor_playback_done: pygame unavailable.", exc_info=True)
+        try:
+            on_done()
+        except Exception:
+            logger.debug("_monitor_playback_done: on_done raised.", exc_info=True)
+
+    threading.Thread(target=_worker, name="PlaybackMonitor", daemon=True).start()
+
+
 def main() -> None:
     """Main entry point. Initializes all subsystems and starts the event loop."""
     import tkinter as tk
 
+    from catguard.annotation import EffectivenessTracker
     from catguard.audio import init_audio, play_alert, shutdown_audio
     from catguard.config import load_settings, save_settings
     from catguard.detection import DetectionEvent, DetectionLoop
-    from catguard.screenshots import save_screenshot
     from catguard.tray import build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
@@ -64,19 +87,33 @@ def main() -> None:
         else:
             logger.warning("Screenshot error (tray not ready): %s", msg)
 
+    tracker = EffectivenessTracker(
+        settings=settings,
+        is_window_open=lambda: getattr(root, "_main_window_visible", False),
+        on_error=_on_screenshot_error,
+    )
+
     def on_cat_detected(event: DetectionEvent) -> None:
         if root._recording_event.is_set():
             logger.debug("on_cat_detected: suppressed — recording in progress.")
             return
-        play_alert(settings, default_sound)
-        save_screenshot(
-            event.frame_bgr,
-            settings,
-            is_window_open=lambda: getattr(root, "_main_window_visible", False),
-            on_error=_on_screenshot_error,
-        )
+        sound_label = play_alert(settings, default_sound)
+        tracker.on_detection(event.frame_bgr, event.boxes, sound_label)
+
+        # Show alert label on main window while sound is playing, then clear it.
+        def _apply_label(label) -> None:
+            win = getattr(root, "_main_window", None)
+            if win is not None and not win._closed:
+                win.set_alert_label(label)
+
+        try:
+            root.after(0, lambda lbl=sound_label: _apply_label(lbl))
+            _monitor_playback_done(lambda: root.after(0, lambda: _apply_label(None)))
+        except Exception:
+            logger.debug("on_cat_detected: could not schedule alert label update.", exc_info=True)
 
     detection_loop = DetectionLoop(settings, on_cat_detected)
+    detection_loop.set_verification_callback(tracker.on_verification)
     detection_loop.start()
 
     # ------------------------------------------------------------------

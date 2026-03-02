@@ -63,7 +63,10 @@ def play_random_alert(paths: list[str], default_path: Path) -> None:
         _play_async(str(default_path))
 
 
-def play_alert(settings, default_path: Path) -> None:
+_ALERT_DEFAULT_LABEL = "Alert: Default"
+
+
+def play_alert(settings, default_path: Path) -> str:
     """Dispatch playback using the active PlaybackMode.
 
     Priority: DEFAULT > PINNED > RANDOM
@@ -74,19 +77,23 @@ def play_alert(settings, default_path: Path) -> None:
     - RANDOM: use_default_sound is False AND pinned_sound is '' or missing
               → random from sound_library_paths; falls back to default_path if empty.
 
+    Returns the sound label string to be displayed on the annotated screenshot:
+    - Built-in default → ``"Alert: Default"``
+    - Any file (pinned or random) → ``Path(file).name`` (filename only, no directory)
+
     Logs which mode fired and why.
     """
     if settings.use_default_sound:
         logger.info("play_alert: mode=DEFAULT — playing built-in default: %s", default_path)
         _play_async(str(default_path))
-        return
+        return _ALERT_DEFAULT_LABEL
 
     pinned = settings.pinned_sound
     if pinned:
         if Path(pinned).is_file():
             logger.info("play_alert: mode=PINNED — playing pinned sound: %s", pinned)
             _play_async(pinned)
-            return
+            return Path(pinned).name
         else:
             logger.warning(
                 "play_alert: mode=PINNED — pinned file missing (%r); falling back to RANDOM.",
@@ -107,6 +114,7 @@ def play_alert(settings, default_path: Path) -> None:
         chosen = _random.choice(valid)
         logger.info("play_alert: mode=RANDOM — playing: %s", chosen)
         _play_async(chosen)
+        return Path(chosen).name
     else:
         logger.info(
             "play_alert: mode=RANDOM — library empty or all invalid; "
@@ -114,6 +122,7 @@ def play_alert(settings, default_path: Path) -> None:
             default_path,
         )
         _play_async(str(default_path))
+        return _ALERT_DEFAULT_LABEL
 
 
 def _play_async(path: str) -> None:

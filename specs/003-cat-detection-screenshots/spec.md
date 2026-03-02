@@ -117,7 +117,7 @@ A user wants screenshots to be saved only during certain hours (e.g., at night).
 
 - **FR-001**: The app MUST capture a screenshot of the current camera frame at every detection event that triggers an alert sound, **provided the main application window is not open at that moment**.
 - **FR-002**: The app MUST save each screenshot into a sub-folder named with the current date in `yyyy-mm-dd` format inside the configured root folder.
-- **FR-012**: The app MUST NOT save a screenshot if the main application window is open at the time of the detection event, regardless of all other conditions.
+- **FR-012**: The app MUST NOT save a **plain** screenshot if the main application window is open at the time of the detection event, regardless of all other conditions. *Note: this rule applies only to plain camera-frame screenshots captured by this feature. Annotated effectiveness screenshots produced by feature 005 are always saved regardless of window state.*
 - **FR-003**: Screenshot file names MUST encode the time of detection (at minimum: hours, minutes, seconds) to uniquely identify each event within a day.
 - **FR-004**: If multiple detections occur within the same second, the app MUST ensure file names are unique (e.g., by appending a counter).
 - **FR-005**: The app MUST create any missing intermediate folders (root folder, `CatGuard` sub-folder, and/or date sub-folder) on-demand at the moment the first screenshot is saved — not at app startup.

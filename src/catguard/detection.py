@@ -44,6 +44,23 @@ class DetectionAction(Enum):
 
 
 @dataclass
+class BoundingBox:
+    """A single detected region within a camera frame.
+
+    Coordinates are pixel-space integers, clamped to frame dimensions.
+    *confidence* is the raw YOLO score in [0.0, 1.0].
+    *label* is the human-readable class name (e.g. "cat").
+    """
+
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+    confidence: float
+    label: str = "cat"
+
+
+@dataclass
 class DetectionEvent:
     """Immutable record of a single detection occurrence (in-memory only)."""
 
@@ -57,6 +74,12 @@ class DetectionEvent:
     Set only for ``SOUND_PLAYED`` events so the screenshot module can save it
     without a second capture. ``None`` for ``COOLDOWN_SUPPRESSED`` events.
     Never written to disk; lives only for the duration of the callback.
+    """
+    boxes: "list[BoundingBox]" = field(default_factory=list)
+    """All bounding boxes detected in the frame at the moment of the event.
+
+    Empty list for ``COOLDOWN_SUPPRESSED`` events or when no boxes are
+    available.  Set to all detected regions for ``SOUND_PLAYED`` events.
     """
 
 
@@ -132,6 +155,14 @@ class DetectionLoop:
         self._model = None
         self._frame_callback: Optional[Callable] = None
         self._frame_callback_lock = threading.Lock()
+        self._pending_frame: Optional["np.ndarray"] = None
+        """Deep copy of detection frame held until verification fires.
+
+        ``None`` when no verification is pending.  Acts as the sole
+        pending-state sentinel (YAGNI: detection-time boxes and sound label
+        are owned by EffectivenessTracker, not this loop).
+        """
+        self._verification_callback: Optional[Callable] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -168,6 +199,23 @@ class DetectionLoop:
         with self._frame_callback_lock:
             self._frame_callback = cb
         logger.debug("Frame callback %s.", "registered" if cb is not None else "cleared")
+
+    def set_verification_callback(
+        self, cb: Optional[Callable[[bool, "list[BoundingBox]"], None]]
+    ) -> None:
+        """Register or clear the post-cooldown verification callback.
+
+        Called as ``cb(has_cat, boxes)`` from the detection loop thread
+        on the first iteration where ``_cooldown_elapsed()`` is True and
+        a pending frame is held in memory.  Implementations MUST NOT
+        perform blocking I/O directly; dispatch to a background thread.
+        Pass *cb=None* to disable.
+        """
+        self._verification_callback = cb
+        logger.debug(
+            "Verification callback %s.",
+            "registered" if cb is not None else "cleared",
+        )
 
     # ------------------------------------------------------------------
     # Internal
@@ -224,6 +272,13 @@ class DetectionLoop:
                 # Pull current threshold from shared settings (live updates for free)
                 conf = self._settings.confidence_threshold
 
+                # --- Verification trigger (T006/T022) ----------------------------
+                # Before running inference: if a pending frame is held and the
+                # cooldown has elapsed, fire the verification callback with the
+                # current live frame's inference results.
+                # We run inference first below and store results; the trigger
+                # check is done AFTER inference so we have the current boxes.
+
                 results = self._model.predict(
                     frame,
                     conf=conf,
@@ -233,37 +288,78 @@ class DetectionLoop:
                     verbose=False,
                 )
 
+                # Collect all bounding boxes from this frame's results.
+                all_boxes: list[BoundingBox] = []
+                max_conf = 0.0
                 for result in results:
-                    boxes = result.boxes
-                    if boxes is None or len(boxes) == 0:
+                    raw_boxes = result.boxes
+                    if raw_boxes is None or len(raw_boxes) == 0:
                         continue
+                    names: dict = getattr(result, "names", {})
+                    for box in raw_boxes:
+                        _conf = float(box.conf[0])
+                        _cls = int(box.cls[0])
+                        _label = names.get(_cls, str(_cls))
+                        h, w = frame.shape[:2]
+                        x1 = max(0, min(int(box.xyxy[0][0]), w - 1))
+                        y1 = max(0, min(int(box.xyxy[0][1]), h - 1))
+                        x2 = max(0, min(int(box.xyxy[0][2]), w - 1))
+                        y2 = max(0, min(int(box.xyxy[0][3]), h - 1))
+                        all_boxes.append(
+                            BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, confidence=_conf, label=_label)
+                        )
+                        max_conf = max(max_conf, _conf)
 
-                    for box in boxes:
-                        confidence = float(box.conf[0])
-                        now = datetime.now(timezone.utc)
+                # Verification trigger: fires once per pending cycle on the first
+                # post-cooldown frame.  Pending state is cleared BEFORE invoking
+                # the callback to prevent re-entrance.
+                if self._pending_frame is not None and self._cooldown_elapsed():
+                    has_cat = len(all_boxes) > 0
+                    cb = self._verification_callback
+                    self._pending_frame = None  # clear before callback
+                    logger.debug(
+                        "Verification trigger fired: has_cat=%s, boxes=%d",
+                        has_cat,
+                        len(all_boxes),
+                    )
+                    if cb is not None:
+                        try:
+                            cb(has_cat, all_boxes)
+                        except Exception:
+                            logger.exception("Verification callback raised an exception.")
 
-                        if self._cooldown_elapsed():
-                            self._last_alert_time = now
-                            event = DetectionEvent(
-                                timestamp=now,
-                                confidence=confidence,
-                                action=DetectionAction.SOUND_PLAYED,
-                                frame_bgr=frame,
-                            )
-                            logger.info(
-                                "Cat detected (conf=%.2f) — ALERTING", confidence
-                            )
-                            self._on_cat_detected(event)
-                        else:
-                            event = DetectionEvent(
-                                timestamp=now,
-                                confidence=confidence,
-                                action=DetectionAction.COOLDOWN_SUPPRESSED,
-                            )
-                            logger.debug(
-                                "Cat detected (conf=%.2f) — COOLDOWN_SUPPRESSED",
-                                confidence,
-                            )
+                # Emit exactly ONE event per frame (not one per box).
+                if all_boxes:
+                    now = datetime.now(timezone.utc)
+                    if self._cooldown_elapsed():
+                        self._last_alert_time = now
+                        # Mandatory copy: cap.read() overwrites the buffer
+                        # on the next iteration.
+                        self._pending_frame = frame.copy()
+                        event = DetectionEvent(
+                            timestamp=now,
+                            confidence=max_conf,
+                            action=DetectionAction.SOUND_PLAYED,
+                            frame_bgr=self._pending_frame,
+                            boxes=all_boxes,
+                        )
+                        logger.info(
+                            "Cat detected (conf=%.2f, %d box(es)) — ALERTING",
+                            max_conf,
+                            len(all_boxes),
+                        )
+                        self._on_cat_detected(event)
+                    else:
+                        event = DetectionEvent(
+                            timestamp=now,
+                            confidence=max_conf,
+                            action=DetectionAction.COOLDOWN_SUPPRESSED,
+                            boxes=all_boxes,
+                        )
+                        logger.debug(
+                            "Cat detected (conf=%.2f) — COOLDOWN_SUPPRESSED",
+                            max_conf,
+                        )
 
                 # Yield the CPU briefly between inferences so the process
                 # doesn't pin a core at 100 %.  Using stop_event.wait means
