@@ -45,6 +45,7 @@ class MainWindow:
         self._geometry_set = False
         self._closed = False         # set to True in _on_close; guards update_frame
         self._on_close_extra = None  # optional callback invoked just before destroy
+        self._alert_label = None     # non-None while an alert sound is playing
 
         # Store reference on root so callers can retrieve/check the instance
         root._main_window = self
@@ -68,7 +69,7 @@ class MainWindow:
         Called via ``root.after(0, ...)`` from the DetectionLoop thread.
         Sizes the window to the frame on first call.
         """
-        from catguard.ui.overlays import draw_detections
+        from catguard.ui.overlays import draw_alert_bar, draw_detections
 
         if self._closed:
             return
@@ -87,8 +88,12 @@ class MainWindow:
                 self._geometry_set = True
                 logger.debug("MainWindow geometry set to %dx%d (frame=%dx%d).", cw, ch, w, h)
 
-            # Draw overlays onto a copy of the frame
+            # Draw bounding-box overlays onto a copy of the frame
             annotated = draw_detections(frame_bgr, detections)
+
+            # Draw alert-sound label bar if a sound is currently playing
+            if self._alert_label is not None:
+                draw_alert_bar(annotated, self._alert_label)
 
             # Convert BGR (OpenCV) → RGB (PIL) → PhotoImage (tkinter)
             from PIL import Image, ImageTk
@@ -104,11 +109,16 @@ class MainWindow:
 
             self._photo_image = photo  # keep reference to prevent GC
 
-            # Show "No detections" overlay text when nothing is detected
-            self._update_no_detections_label(detections)
-
         except Exception:
             logger.exception("Error updating MainWindow frame.")
+
+    def set_alert_label(self, label) -> None:
+        """Set or clear the alert-sound label shown in the live-view top bar.
+
+        Pass the sound filename (str) when playback starts; pass None when it ends.
+        Safe to call from any thread via root.after(0, ...).
+        """
+        self._alert_label = label
 
     def _update_no_detections_label(self, detections) -> None:
         """Show or hide a 'No detections' text overlay."""

@@ -133,9 +133,11 @@ def _load_icon() -> Image.Image:
     pre-cache a proper .ico on disk and return it opened via Image.open so
     that Pillow carries full ICO format info for the subsequent save.
     """
-    # Build source image from PNG asset or placeholder
+    # Build source image from PNG asset, ICO asset, or placeholder
     if _ICON_PATH.exists():
         img = Image.open(_ICON_PATH).convert("RGBA")
+    elif _ICON_ICO_PATH.exists():
+        img = Image.open(_ICON_ICO_PATH).convert("RGBA")
     else:
         logger.warning("Icon file not found at %s — using placeholder.", _ICON_PATH)
         img = Image.new("RGBA", (48, 48), (100, 149, 237, 255))

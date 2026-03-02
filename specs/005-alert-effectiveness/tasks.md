@@ -17,7 +17,7 @@
 
 **Purpose**: Verify project dependencies are declared before writing new code.
 
-- [ ] T001 Verify `opencv-python` is declared in `pyproject.toml` and `requirements.txt`; add if missing
+- [X] T001 Verify `opencv-python` is declared in `pyproject.toml` and `requirements.txt`; add if missing
 
 ---
 
@@ -31,15 +31,15 @@ return type. MUST be complete before any user story work begins.
 
 ### Tests — write first, confirm RED before implementing
 
-- [ ] T002 [P] Write failing tests for `play_alert()` return values (DEFAULT / PINNED / RANDOM / fallback paths) in `tests/unit/test_audio.py`
-- [ ] T003 [P] Write failing tests for `BoundingBox` dataclass, `DetectionEvent.boxes` field, and one-`SOUND_PLAYED`-per-frame behavior in `tests/unit/test_detection.py`
+- [X] T002 [P] Write failing tests for `play_alert()` return values (DEFAULT / PINNED / RANDOM / fallback paths) in `tests/unit/test_audio.py`
+- [X] T003 [P] Write failing tests for `BoundingBox` dataclass, `DetectionEvent.boxes` field, and one-`SOUND_PLAYED`-per-frame behavior in `tests/unit/test_detection.py`
 
 ### Implementation
 
-- [ ] T004 Add `BoundingBox` dataclass (x1, y1, x2, y2, confidence) to `src/catguard/detection.py`
-- [ ] T005 Add `boxes: list[BoundingBox]` field (`default_factory=list`) to `DetectionEvent` in `src/catguard/detection.py`
-- [ ] T006 Refactor `DetectionLoop._run()` inner loop to collect all cat boxes first and emit exactly one `SOUND_PLAYED` event per frame in `src/catguard/detection.py`; on the `SOUND_PLAYED` path set `self._pending_frame = frame.copy()` (`.copy()` is mandatory — `cap.read()` overwrites the buffer each iteration); sound label is not set here — it flows from `play_alert()` via `tracker.on_detection()` in `main.py`
-- [ ] T007 [P] Change `play_alert()` return type from `None` to `str`; return `"Alert: Default"` for DEFAULT/fallback and `Path(chosen).name` for PINNED/RANDOM in `src/catguard/audio.py`
+- [X] T004 Add `BoundingBox` dataclass (x1, y1, x2, y2, confidence) to `src/catguard/detection.py`
+- [X] T005 Add `boxes: list[BoundingBox]` field (`default_factory=list`) to `DetectionEvent` in `src/catguard/detection.py`
+- [X] T006 Refactor `DetectionLoop._run()` inner loop to collect all cat boxes first and emit exactly one `SOUND_PLAYED` event per frame in `src/catguard/detection.py`; on the `SOUND_PLAYED` path set `self._pending_frame = frame.copy()` (`.copy()` is mandatory — `cap.read()` overwrites the buffer each iteration); sound label is not set here — it flows from `play_alert()` via `tracker.on_detection()` in `main.py`
+- [X] T007 [P] Change `play_alert()` return type from `None` to `str`; return `"Alert: Default"` for DEFAULT/fallback and `Path(chosen).name` for PINNED/RANDOM in `src/catguard/audio.py`
 
 **Checkpoint**: `pytest tests/unit/test_audio.py tests/unit/test_detection.py -q` — all new tests pass.
 
@@ -56,15 +56,15 @@ modified (sound label rendered).
 
 ### Tests — write first, confirm RED before implementing
 
-- [ ] T008 [US1] Write failing unit tests for `build_sound_label()` — `None` → `"Alert: Default"`, absolute path → filename only, `"Alert: Default"` pass-through — in `tests/unit/test_annotation.py`
-- [ ] T009 [US1] Write failing unit tests for `annotate_frame()` bounding box layer (rectangle pixels at box edges changed) and sound label layer (top-left region modified) in `tests/unit/test_annotation.py`
+- [X] T008 [US1] Write failing unit tests for `build_sound_label()` — `None` → `"Alert: Default"`, absolute path → filename only, `"Alert: Default"` pass-through — in `tests/unit/test_annotation.py`
+- [X] T009 [US1] Write failing unit tests for `annotate_frame()` bounding box layer (rectangle pixels at box edges changed) and sound label layer (top-left region modified) in `tests/unit/test_annotation.py`
 
 ### Implementation
 
-- [ ] T010 [US1] Create `src/catguard/annotation.py` with module scaffold: imports (`cv2`, `numpy`, `pathlib`, `logging`, `threading`), visual constants (`BOX_COLOR`, `FONT`, `FONT_SCALE`, `SUCCESS_BG`, `FAILURE_BG`, `TEXT_COLOR`, `OUTCOME_FONT_SCALE`), and `logger = logging.getLogger(__name__)`
-- [ ] T011 [US1] Implement `build_sound_label(value: Optional[str]) -> str` in `src/catguard/annotation.py`
-- [ ] T012 [US1] Implement bounding box + confidence label annotation layer in `annotate_frame()` using two-pass approach (measure text → draw background rect → draw text) in `src/catguard/annotation.py`
-- [ ] T013 [US1] Implement sound label top-left corner layer in `annotate_frame()` (filled background rect at x=10, text on top) in `src/catguard/annotation.py`
+- [X] T010 [US1] Create `src/catguard/annotation.py` with module scaffold: imports (`cv2`, `numpy`, `pathlib`, `logging`, `threading`), visual constants (`BOX_COLOR`, `FONT`, `FONT_SCALE`, `SUCCESS_BG`, `FAILURE_BG`, `TEXT_COLOR`, `OUTCOME_FONT_SCALE`), and `logger = logging.getLogger(__name__)`
+- [X] T011 [US1] Implement `build_sound_label(value: Optional[str]) -> str` in `src/catguard/annotation.py`
+- [X] T012 [US1] Implement bounding box + confidence label annotation layer in `annotate_frame()` using two-pass approach (measure text → draw background rect → draw text) in `src/catguard/annotation.py`
+- [X] T013 [US1] Implement sound label top-left corner layer in `annotate_frame()` (filled background rect at x=10, text on top) in `src/catguard/annotation.py`
 
 **Checkpoint**: `pytest tests/unit/test_annotation.py -q` — all US1 tests pass. `annotate_frame()` and `build_sound_label()` work correctly as standalone pure functions.
 
@@ -83,19 +83,19 @@ exists in `tmp_path` with green pixels in the bottom strip.
 
 ### Tests — write first, confirm RED before implementing
 
-- [ ] T014 [US2] Extend `tests/unit/test_annotation.py` with failing tests for `EffectivenessTracker` state machine: `on_detection()` stores frame, FR-005a ignore-if-pending, `_is_pending` property, `on_verification()` clears pending state
-- [ ] T015 [US2] Extend `tests/unit/test_annotation.py` with failing tests for outcome overlay: green strip for `outcome="deterred"`, red strip for `outcome="remained"`, no strip for `outcome=None` in `annotate_frame()`
-- [ ] T016 [P] [US2] Write failing unit tests for `DetectionLoop.set_verification_callback()` and verification trigger logic (fires callback on first frame after `_cooldown_elapsed()` with pending state, clears pending state before invoking callback) in `tests/unit/test_detection.py`
-- [ ] T017 [P] [US2] Write failing integration test for full pipeline (detection event → `EffectivenessTracker` stores snapshot → `on_verification` called → annotated JPEG written to `tmp_path` → verify green/red pixel in outcome strip and bounding box pixel) in `tests/integration/test_effectiveness_integration.py`
+- [X] T014 [US2] Extend `tests/unit/test_annotation.py` with failing tests for `EffectivenessTracker` state machine: `on_detection()` stores frame, FR-005a ignore-if-pending, `_is_pending` property, `on_verification()` clears pending state
+- [X] T015 [US2] Extend `tests/unit/test_annotation.py` with failing tests for outcome overlay: green strip for `outcome="deterred"`, red strip for `outcome="remained"`, no strip for `outcome=None` in `annotate_frame()`
+- [X] T016 [P] [US2] Write failing unit tests for `DetectionLoop.set_verification_callback()` and verification trigger logic (fires callback on first frame after `_cooldown_elapsed()` with pending state, clears pending state before invoking callback) in `tests/unit/test_detection.py`
+- [X] T017 [P] [US2] Write failing integration test for full pipeline (detection event → `EffectivenessTracker` stores snapshot → `on_verification` called → annotated JPEG written to `tmp_path` → verify green/red pixel in outcome strip and bounding box pixel) in `tests/integration/test_effectiveness_integration.py`
 
 ### Implementation
 
-- [ ] T018 [US2] Implement outcome overlay annotation layer (`outcome="deterred"` → green full-width strip, `outcome="remained"` → red strip, `outcome=None` → no-op) in `annotate_frame()` in `src/catguard/annotation.py`
-- [ ] T019 [US2] Implement `_save_annotated_async(frame, settings, is_window_open, on_error)` fire-and-forget daemon thread in `src/catguard/annotation.py` (mirrors `_play_async` pattern; wraps `save_screenshot()` call; log INFO on successful save with file path; log ERROR + invoke `on_error` on all exceptions — NFR-002; constitution II requires logging here, not deferred to Phase 5)
-- [ ] T020 [US2] Implement `EffectivenessTracker` class in `src/catguard/annotation.py`: `on_detection()` with FR-005a guard (log DEBUG on store, DEBUG on ignore-if-pending); `on_verification()` (log INFO on outcome + save dispatched, WARNING on no-outcome/camera-unavailable save); `_is_pending` property; logging is part of this task per constitution II
-- [ ] T021 [P] [US2] Add `_pending_frame: Optional[np.ndarray] = None` state field and `set_verification_callback()` public method to `DetectionLoop` in `src/catguard/detection.py`; `_pending_frame` is the sole pending-state sentinel — `_pending_boxes`/`_pending_sound` are not stored here (YAGNI; detection-time data is owned by `EffectivenessTracker`)
-- [ ] T022 [US2] Add verification trigger block to `DetectionLoop._run()` in `src/catguard/detection.py`: check `_pending_frame is not None` and `_cooldown_elapsed()` before normal detection; clear `_pending_frame = None` **before** invoking callback (prevents re-entrance); also handle camera-unavailable fallback — if `cap.read()` returns `ret=False` while pending and cooldown has elapsed, invoke the callback with `has_cat=False, boxes=[]` and clear `_pending_frame` (satisfies FR-012: saves without outcome overlay rather than holding the frame in memory indefinitely)
-- [ ] T023 [US2] In `src/catguard/main.py`: (1) instantiate `EffectivenessTracker(settings=settings, is_window_open=<lambda checking main_window exists>, on_error=<tray notification callback>)` at app setup; (2) register `detection_loop.set_verification_callback(tracker.on_verification)`; (3) in `on_cat_detected`, capture `sound_label = play_alert(settings, default_sound)` and call `tracker.on_detection(event.frame_bgr, event.boxes, sound_label)`
+- [X] T018 [US2] Implement outcome overlay annotation layer (`outcome="deterred"` → green full-width strip, `outcome="remained"` → red strip, `outcome=None` → no-op) in `annotate_frame()` in `src/catguard/annotation.py`
+- [X] T019 [US2] Implement `_save_annotated_async(frame, settings, is_window_open, on_error)` fire-and-forget daemon thread in `src/catguard/annotation.py` (mirrors `_play_async` pattern; wraps `save_screenshot()` call; log INFO on successful save with file path; log ERROR + invoke `on_error` on all exceptions — NFR-002; constitution II requires logging here, not deferred to Phase 5)
+- [X] T020 [US2] Implement `EffectivenessTracker` class in `src/catguard/annotation.py`: `on_detection()` with FR-005a guard (log DEBUG on store, DEBUG on ignore-if-pending); `on_verification()` (log INFO on outcome + save dispatched, WARNING on no-outcome/camera-unavailable save); `_is_pending` property; logging is part of this task per constitution II
+- [X] T021 [P] [US2] Add `_pending_frame: Optional[np.ndarray] = None` state field and `set_verification_callback()` public method to `DetectionLoop` in `src/catguard/detection.py`; `_pending_frame` is the sole pending-state sentinel — `_pending_boxes`/`_pending_sound` are not stored here (YAGNI; detection-time data is owned by `EffectivenessTracker`)
+- [X] T022 [US2] Add verification trigger block to `DetectionLoop._run()` in `src/catguard/detection.py`: check `_pending_frame is not None` and `_cooldown_elapsed()` before normal detection; clear `_pending_frame = None` **before** invoking callback (prevents re-entrance); also handle camera-unavailable fallback — if `cap.read()` returns `ret=False` while pending and cooldown has elapsed, invoke the callback with `has_cat=False, boxes=[]` and clear `_pending_frame` (satisfies FR-012: saves without outcome overlay rather than holding the frame in memory indefinitely)
+- [X] T023 [US2] In `src/catguard/main.py`: (1) instantiate `EffectivenessTracker(settings=settings, is_window_open=<lambda checking main_window exists>, on_error=<tray notification callback>)` at app setup; (2) register `detection_loop.set_verification_callback(tracker.on_verification)`; (3) in `on_cat_detected`, capture `sound_label = play_alert(settings, default_sound)` and call `tracker.on_detection(event.frame_bgr, event.boxes, sound_label)`
 
 **Checkpoint**: `pytest tests/ -q` — all tests pass including integration pipeline. Bounding boxes, sound label, and outcome overlay all render correctly end-to-end.
 
@@ -105,8 +105,8 @@ exists in `tmp_path` with green pixels in the bottom strip.
 
 **Purpose**: Observability (constitution requirement II), error resilience, and manual validation.
 
-- [ ] T024 [P] Review observability in `src/catguard/annotation.py`: verify all log statements added in T019/T020 are present (DEBUG on detection/ignore, INFO on outcome, WARNING on no-outcome, ERROR on save failure); add any missing statements
-- [ ] T025 [P] Add observability logging to `src/catguard/detection.py`: log at DEBUG on verification trigger fired, DEBUG on has_cat result, DEBUG on pending state cleared
+- [X] T024 [P] Review observability in `src/catguard/annotation.py`: verify all log statements added in T019/T020 are present (DEBUG on detection/ignore, INFO on outcome, WARNING on no-outcome, ERROR on save failure); add any missing statements
+- [X] T025 [P] Add observability logging to `src/catguard/detection.py`: log at DEBUG on verification trigger fired, DEBUG on has_cat result, DEBUG on pending state cleared
 - [ ] T026 Run quickstart.md manual validation: trigger detection, wait cooldown with cat gone → verify green-strip JPEG in screenshots folder; trigger again, keep cat in frame → verify red-strip JPEG
 
 ---

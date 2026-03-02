@@ -281,3 +281,101 @@ class TestPlayAlertRandomMode:
 
         assert set(played).issubset(set(files))
 
+
+# ---------------------------------------------------------------------------
+# T002: play_alert() MUST return str (sound label for screenshot annotation)
+# ---------------------------------------------------------------------------
+
+class TestPlayAlertReturnValue:
+    """T002 — play_alert() must return a str label for screenshot annotation."""
+
+    def test_default_mode_returns_alert_default(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=True)
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "Alert: Default"
+
+    def test_pinned_mode_returns_filename(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        pinned = tmp_path / "meow_alarm.wav"
+        pinned.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=False, pinned_sound=str(pinned))
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "meow_alarm.wav"
+
+    def test_random_mode_returns_filename(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "siren.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="",
+            sound_library_paths=[str(lib)],
+        )
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "siren.wav"
+
+    def test_pinned_missing_fallback_to_random_returns_filename(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        lib = tmp_path / "fallback.wav"
+        lib.write_bytes(b"\x00" * 44)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="/nonexistent/missing.wav",
+            sound_library_paths=[str(lib)],
+        )
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "fallback.wav"
+
+    def test_random_empty_library_returns_alert_default(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=False, pinned_sound="")
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "Alert: Default"
+
+    def test_random_all_unsupported_returns_alert_default(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        bad = tmp_path / "sound.ogg"
+        bad.write_bytes(b"\x00" * 10)
+        settings = _make_settings(
+            use_default_sound=False,
+            pinned_sound="",
+            sound_library_paths=[str(bad)],
+        )
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert result == "Alert: Default"
+
+    def test_return_type_is_str(self, tmp_path):
+        default = tmp_path / "default.wav"
+        default.write_bytes(b"\x00" * 44)
+        settings = _make_settings(use_default_sound=True)
+
+        with patch("catguard.audio._play_async"):
+            result = play_alert(settings, default)
+
+        assert isinstance(result, str)
+

@@ -23,9 +23,38 @@ logger = logging.getLogger(__name__)
 # Styling constants
 # ---------------------------------------------------------------------------
 BOX_COLOR: tuple[int, int, int] = (0, 255, 0)   # BGR green
-LABEL_FONT_SCALE: float = 0.6
+LABEL_FONT_SCALE: float = 0.75
 LABEL_THICKNESS: int = 2
 LABEL_PADDING: int = 4  # pixels above bounding box top for label placement
+
+# Top alert-bar constants — mirror annotation.BAR_HEIGHT so both windows look alike
+ALERT_BAR_HEIGHT: int = 32   # pixels; matches annotation.BAR_HEIGHT
+_ALERT_BAR_BG: tuple[int, int, int] = (0, 0, 0)
+_ALERT_FONT_SIZE: int = 16
+_ALERT_FONT_PAD: int = 4
+
+
+def _load_overlay_font(size: int):
+    """Return a PIL TrueType font covering Unicode; fall back to default bitmap."""
+    try:
+        from PIL import ImageFont as _IFont
+    except ImportError:  # pragma: no cover
+        return None
+    _CANDIDATES = [
+        r"C:\Windows\Fonts\segoeui.ttf",
+        r"C:\Windows\Fonts\arial.ttf",
+        r"C:\Windows\Fonts\tahoma.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/System/Library/Fonts/Supplemental/Arial.ttf",
+        "/Library/Fonts/Arial.ttf",
+    ]
+    for path in _CANDIDATES:
+        try:
+            return _IFont.truetype(path, size)
+        except (OSError, AttributeError):
+            continue
+    return _IFont.load_default()
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +121,7 @@ def draw_detections(frame: np.ndarray, results) -> np.ndarray:
     out = frame.copy()
     if not results:
         return out
+    import cv2
     for result in results:
         boxes = getattr(result, "boxes", None)
         if boxes is None:
@@ -100,12 +130,60 @@ def draw_detections(frame: np.ndarray, results) -> np.ndarray:
         for box in boxes:
             try:
                 x1, y1, x2, y2 = (int(v) for v in box.xyxy[0])
+                conf = float(box.conf[0])
                 cls_id = int(box.cls[0])
-                label = names.get(cls_id, str(cls_id))
+                name = names.get(cls_id, str(cls_id))
+                label = f"{name} {int(conf * 100)}%"
+
                 draw_bounding_box(out, (x1, y1, x2, y2))
-                # Place label above top-left corner of the box
-                label_y = max(y1 - LABEL_PADDING, 12)
-                draw_label(out, label, (x1, label_y))
+
+                # Filled background rect + label above box top-left corner
+                _DRAW_THICKNESS = 1
+                (tw, th), baseline = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, LABEL_FONT_SCALE, _DRAW_THICKNESS
+                )
+                label_x = x1
+                label_y = max(y1 - LABEL_PADDING, th + LABEL_PADDING)
+                cv2.rectangle(
+                    out,
+                    (label_x - LABEL_PADDING, label_y - th - LABEL_PADDING),
+                    (label_x + tw + LABEL_PADDING, label_y + baseline + LABEL_PADDING),
+                    BOX_COLOR,
+                    -1,
+                )
+                draw_label(out, label, (label_x, label_y), color=(0, 0, 0), thickness=_DRAW_THICKNESS)
             except Exception:
                 logger.exception("Error drawing detection overlay for box %s", box)
     return out
+
+
+def draw_alert_bar(frame: np.ndarray, sound_label: str) -> None:
+    """Draw a full-width black info bar at the top of *frame* in-place.
+
+    Renders *sound_label* (Unicode-safe via Pillow) centred vertically within
+    a bar of ALERT_BAR_HEIGHT pixels — the same height used on saved screenshots.
+    No-ops silently if Pillow or OpenCV is unavailable.
+    """
+    try:
+        import cv2 as _cv2
+        from PIL import Image as _PILImg
+        from PIL import ImageDraw as _PILDraw
+    except ImportError:  # pragma: no cover
+        return
+
+    _h, w = frame.shape[:2]
+    pad = _ALERT_FONT_PAD
+
+    pil_img = _PILImg.fromarray(_cv2.cvtColor(frame, _cv2.COLOR_BGR2RGB))
+    draw = _PILDraw.Draw(pil_img)
+    font = _load_overlay_font(_ALERT_FONT_SIZE)
+
+    # Full-width background strip
+    draw.rectangle((0, 0, w, ALERT_BAR_HEIGHT), fill=_ALERT_BAR_BG)
+
+    # Use anchor="lm" so the text is pinned to the vertical midpoint of the
+    # bar, matching the same centering used on saved screenshots.
+    mid_y = ALERT_BAR_HEIGHT // 2
+    draw.text((pad, mid_y), sound_label, font=font, fill=(255, 255, 255), anchor="lm")
+
+    frame[:] = _cv2.cvtColor(np.array(pil_img), _cv2.COLOR_RGB2BGR)

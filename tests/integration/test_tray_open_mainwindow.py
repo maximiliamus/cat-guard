@@ -125,16 +125,16 @@ class TestTrayOpenMainWindow:
         assert "No detections" not in create_text_calls
 
     def test_no_detection_shows_overlay_text(self, headless_main_window):
-        """With empty detections, 'No detections' text must appear on the canvas."""
+        """With empty detections, update_frame must not crash and must render the frame."""
         MainWindow, mock_root, mock_toplevel, mock_canvas = headless_main_window
         win = MainWindow(mock_root)
         frame = _synthetic_frame(480, 640)
 
         with patch("PIL.ImageTk.PhotoImage", return_value=MagicMock()):
-            win.update_frame(frame, [])
+            win.update_frame(frame, [])  # must not raise
 
         create_text_calls = str(mock_canvas.create_text.call_args_list)
-        assert "No detections" in create_text_calls
+        assert "No detections" not in create_text_calls
 
     def test_geometry_clamped_for_oversized_frame(self, headless_main_window):
         """Frame larger than screen bounds must be clamped to screen size."""
