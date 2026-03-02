@@ -44,7 +44,9 @@ On first run, CatGuard will:
 - Spec-driven with [Spec Kit](https://github.com/github/spec-kit)
 - Cross-platform
 
+
 # Interesting Facts
 
-- Default sound is cut from "Tom spells CAT" from https://www.tomandjerryonline.com/sounds.cfm
-- This app doesn't help me with my cat :-)
+- The default sound is "Tom spells CAT" from [Tom and Jerry Online](https://www.tomandjerryonline.com/sounds.cfm).
+- Not a single line of Python code was written by a human.
+- Despite its features, this app still doesn't help me with my cat :-)
