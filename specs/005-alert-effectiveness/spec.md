@@ -15,7 +15,7 @@
 - Q: What is the default duration of the re-entry monitoring window? → A: 2 minutes.
 - Q: Which optional extensions are in scope for this feature? → A: Only US1 (bounding boxes) and US2 (outcome labeling) are in scope. US3, US4, US5 are explicitly deferred. Additional in-scope requirement: the filename of the alert sound played during detection MUST also be displayed on the saved screenshot.
 - Q: What label is shown on the screenshot when the built-in default alert sound plays (no custom filename)? → A: Display "Alert: Default".
-- Q: Where are the alert sound label and outcome overlay positioned on the screenshot? → A: Alert sound filename label in the top-left corner; outcome overlay in the bottom-left corner.
+- Q: Where are the alert sound label and outcome overlay positioned on the screenshot? → A: The top of the screenshot shows a full-width black info bar (same height as the bottom outcome strip) with the alert sound filename on the left side and the local date/time at the moment of saving on the right side; the outcome overlay is a full-width filled strip at the bottom edge.
 - Q: Are the example outcome messages in FR-009/FR-010 normative or illustrative? → A: Illustrative — any equivalent human-readable message conveying the same intent is acceptable.
 - Q: Should SC-005 and SC-006 (which reference deferred features) be removed or marked deferred? → A: Marked deferred.
 
@@ -28,11 +28,12 @@
 - When multiple cats are detected in a single frame, all bounding boxes with their individual confidence scores are drawn.
 - The outcome overlay is rendered directly onto the detection screenshot before it is written to disk; the original bounding boxes and confidence labels remain fully visible alongside the outcome label.
 - The filename (without path) of the alert sound that was played at the time of detection is recorded and displayed on the saved screenshot as part of the annotation layer. When the built-in default sound is played, the label "Alert: Default" is shown.
-- The annotation layout follows a fixed zone scheme: alert sound filename label is rendered in the top-left corner of the screenshot; the outcome overlay is rendered as a full-width filled strip at the bottom edge of the frame. Bounding boxes are rendered on the detected regions within the frame. These three zones do not overlap.
+- The annotation layout follows a fixed zone scheme: the top of the screenshot shows a full-width black info bar (equal in pixel height to the bottom outcome strip) with the alert sound filename on the left and the local date/time of saving on the right; the outcome overlay is rendered as a full-width filled strip at the bottom edge of the frame. Bounding boxes are rendered on the detected regions within the frame. These three zones do not overlap.
+- Both the top info bar and the bottom outcome strip share the same pixel height so that the two bands are visually symmetric.
 - User Stories 3 (time-to-clear), 4 (re-entry monitoring), and 5 (session statistics) are explicitly out of scope for this feature. They are deferred to future features and MUST NOT be implemented as part of this release.
 - The verification check uses the same detection model and threshold as normal operation.
 - If the verification check cannot be performed (e.g., camera becomes unavailable during the cooldown), the screenshot is saved without an outcome label, and the absence of an outcome label itself is meaningful to the user.
-- While a cooldown is active, any new detection events are ignored for screenshot purposes. Only one pending screenshot exists per cooldown cycle; no queue of screenshots accumulates in memory.
+- Annotated effectiveness screenshots are saved unconditionally regardless of whether the main application window is open. The window-open suppression rule (spec 003 FR-012) applies only to plain (non-annotated) screenshots; it does not apply to the annotated effectiveness records produced by this feature, which are analysis records rather than live capture stills.
 - "Time-to-clear" measurement (User Story 3) requires periodic sampling during the cooldown — this is a separate optional mechanism on top of the basic end-of-cooldown check.
 - Re-entry monitoring (User Story 4) begins only after a successful deterrence verdict and monitors for a configurable short window after the cat's departure is confirmed. The default re-entry monitoring window is 2 minutes. If a re-entry is detected, a new separate re-entry screenshot is saved with its own annotation; the original deterrence screenshot is never modified or overwritten. The two screenshots are linked by a shared filename prefix derived from the original detection timestamp.
 - Statistics counters (User Story 5) are per-session (reset on app restart) in the initial implementation; persistence across sessions is out of scope.
@@ -111,7 +112,7 @@ After the alert fires, a user wants to know whether it actually deterred the cat
 **Bounding Box Annotation**
 
 - **FR-001**: System MUST render a bounding box on every saved screenshot around each region identified as containing a cat at the moment of detection.
-- **FR-002**: Each bounding box MUST be labelled with the detection confidence score expressed as a human-readable percentage (e.g., "92%").
+- **FR-002**: Each bounding box MUST be labelled with the detected object class name and the confidence score expressed as a human-readable percentage (e.g., "cat 92%").
 - **FR-003**: When multiple cats are detected simultaneously, all bounding boxes and confidence labels MUST be drawn — one per detected region.
 - **FR-004**: Bounding box lines and confidence labels MUST be visually distinct from the background of the camera frame (sufficient contrast) and MUST NOT fully obscure the detected cat.
 
@@ -128,7 +129,8 @@ After the alert fires, a user wants to know whether it actually deterred the cat
 - **FR-009**: If no cat is detected in the verification frame, the outcome overlay MUST use green visual styling with a human-readable message conveying that the cat left and the alert was effective (e.g., "Cat left – alert worked!" — the example is illustrative; any equivalent message conveying the same intent is acceptable).
 - **FR-010**: If a cat is still detected in the verification frame, the outcome overlay MUST use red visual styling with a human-readable message conveying that the cat remained and the alert had no effect (e.g., "Cat remained after alert" — the example is illustrative; any equivalent message conveying the same intent is acceptable).
 - **FR-011**: The outcome overlay MUST be rendered as a full-width filled strip at the bottom edge of the frame. This zone MUST NOT overlap with bounding boxes or the top-left sound filename label.
-- **FR-011a**: The alert sound filename label MUST be rendered in the top-left corner of the screenshot. When the built-in default alert sound is played, the label MUST read "Alert: Default".
+- **FR-011a**: The top edge of the saved screenshot MUST show a full-width black info bar identical in height to the bottom outcome strip. The bar MUST display the alert sound filename on the left side and the local date/time at the moment of saving on the right side. Both texts MUST be vertically centred within the bar. When the built-in default alert sound is played, the left-side label MUST read "Alert: Default".
+- **FR-011b**: Annotated effectiveness screenshots MUST always be saved to disk regardless of whether the main application window is open. The window-open suppression rule (spec 003 FR-012) does not apply to these annotated records.
 - **FR-012**: If the verification check cannot be completed (e.g., camera unavailable), the screenshot MUST be saved without an outcome overlay; no placeholder or error code is added.
 
 **Time-to-Clear Measurement — ⛔ DEFERRED (out of scope for this feature)**

@@ -54,8 +54,8 @@ The main window should present the live capture with detection overlays, includi
 
 **Acceptance Scenarios**:
 
-1. **Given** the capture contains one or more cats, **When** view is open, **Then** each cat has a bounding box and a short label next to it.
-2. **Given** no objects detected, **When** view is open, **Then** the UI shows an unobtrusive message such as "No detections" and still matches the captured frame size.
+1. **Given** the capture contains one or more cats, **When** view is open, **Then** each cat has a bounding box and a short label next to it showing the detected class name and confidence percentage.
+2. **Given** an alert sound is currently playing, **When** the main window is visible, **Then** a full-width black info bar is displayed at the top of the live frame showing the alert sound filename. The bar disappears automatically as soon as playback ends.
 
 ---
 
