@@ -33,6 +33,12 @@ CAT_CLASS_ID = 15
 MODEL_NAME = "yolo11n.pt"
 
 
+class CameraError(Exception):
+    """Raised when camera operations fail (open, read, release)."""
+
+    pass
+
+
 class DetectionAction(Enum):
     """Outcome of a single detection event."""
 
@@ -163,6 +169,10 @@ class DetectionLoop:
         are owned by EffectivenessTracker, not this loop).
         """
         self._verification_callback: Optional[Callable] = None
+        # Pause/resume state management (T002, T003, T004)
+        self._is_tracking = False
+        self._tracking_lock = threading.Lock()
+        self._on_error_callback: Optional[Callable[[str], None]] = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -217,12 +227,88 @@ class DetectionLoop:
             "registered" if cb is not None else "cleared",
         )
 
+    def set_error_callback(self, cb: Optional[Callable[[str], None]]) -> None:
+        """Register or clear the camera error callback.
+
+        Called as ``cb(error_message)`` from the detection loop thread
+        when a camera error occurs and auto-pause is triggered.
+        Pass *cb=None* to disable.
+        """
+        self._on_error_callback = cb
+        logger.debug(
+            "Error callback %s.",
+            "registered" if cb is not None else "cleared",
+        )
+
+    def pause(self) -> bool:
+        """Stop the detection loop and disable camera.
+
+        Returns:
+            bool: True if pause was executed, False if already paused
+
+        Thread-safe: Can be called from any thread
+        Idempotent: Safe to call multiple times
+        """
+        with self._tracking_lock:
+            if not self._is_tracking:
+                return False  # Already paused
+            self._is_tracking = False
+        # Signal loop to stop (existing mechanism)
+        self._stop_event.set()
+        logger.info("Tracking paused.")
+        return True
+
+    def resume(self) -> bool:
+        """Start the detection loop and enable camera.
+
+        Returns:
+            bool: True if resume was executed, False if already active
+
+        Raises:
+            CameraError: If camera cannot be opened
+
+        Thread-safe: Can be called from any thread
+        Idempotent: Safe to call multiple times
+        """
+        with self._tracking_lock:
+            if self._is_tracking:
+                return False  # Already running
+            self._is_tracking = True
+            self._stop_event.clear()  # Clear stop signal
+        
+        # Restart the detection thread since it exits when paused
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(
+                target=self._run, name="DetectionLoop", daemon=True
+            )
+            self._thread.start()
+        
+        logger.info("Tracking resumed.")
+        return True
+
+    def is_tracking(self) -> bool:
+        """Return whether tracking is currently active.
+
+        Returns:
+            bool: True if tracking active, False if paused/stopped
+
+        Thread-safe: Read-only lock
+        """
+        with self._tracking_lock:
+            return self._is_tracking
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
     def _load_model(self) -> None:
-        """Lazy-load the YOLO model (runs once inside the daemon thread)."""
+        """Lazy-load the YOLO model (runs once inside the daemon thread).
+        
+        Cached in memory across pause/resume cycles for efficiency.
+        """
+        if self._model is not None:
+            return  # Model already loaded, reuse it
+        
         from ultralytics import YOLO
 
         self._model = YOLO(MODEL_NAME)
@@ -247,6 +333,13 @@ class DetectionLoop:
         # Limit the internal OpenCV buffer to 1 frame so we always process
         # the most recent camera frame rather than stale buffered ones.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+        
+        # Increase field of view by minimizing zoom (if supported by camera)
+        try:
+            cap.set(cv2.CAP_PROP_ZOOM, 1)  # Minimize zoom for widest FOV
+        except Exception:
+            pass  # Camera may not support zoom control
+            
         if not cap.isOpened():
             logger.warning(
                 "Could not open camera at index %d. Detection loop exiting.",
@@ -260,14 +353,17 @@ class DetectionLoop:
             while not self._stop_event.is_set():
                 ret, frame = cap.read()
                 if not ret:
-                    logger.warning(
-                        "Failed to read frame from camera %d.",
-                        self._settings.camera_index,
-                    )
-                    # Brief pause before retrying to avoid a tight error loop
-                    if self._stop_event.wait(timeout=0.5):
-                        break
-                    continue
+                    error_msg = f"Failed to read frame from camera {self._settings.camera_index}."
+                    logger.warning(error_msg)
+                    # Auto-pause on camera error (T007)
+                    self.pause()
+                    # Notify error callback if registered
+                    if self._on_error_callback:
+                        try:
+                            self._on_error_callback(error_msg)
+                        except Exception:  # pragma: no cover
+                            logger.exception("Error callback raised an exception.")
+                    break  # Exit detection loop
 
                 # Pull current threshold from shared settings (live updates for free)
                 conf = self._settings.confidence_threshold
@@ -279,16 +375,35 @@ class DetectionLoop:
                 # We run inference first below and store results; the trigger
                 # check is done AFTER inference so we have the current boxes.
 
+                # Resize frame for faster inference (480p) but keep original for display
+                try:
+                    h, w = frame.shape[:2]
+                except (AttributeError, ValueError):
+                    # Mock frame or invalid shape in tests
+                    h, w = 480, 640
+                    
+                if h > 0 and w > 0:
+                    scale = min(480.0 / h, 640.0 / w)
+                else:
+                    scale = 1.0
+                    
+                if scale < 1.0:
+                    small_frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
+                else:
+                    small_frame = frame
+                    scale = 1.0  # No scaling needed
+
                 results = self._model.predict(
-                    frame,
+                    small_frame,
                     conf=conf,
                     classes=[CAT_CLASS_ID],
                     device="cpu",
-                    imgsz=640,  # 640px: needed to reliably detect cats further from the camera
+                    imgsz=640,
                     verbose=False,
                 )
 
                 # Collect all bounding boxes from this frame's results.
+                # Scale boxes back to original frame size if we resized
                 all_boxes: list[BoundingBox] = []
                 max_conf = 0.0
                 for result in results:
@@ -300,11 +415,17 @@ class DetectionLoop:
                         _conf = float(box.conf[0])
                         _cls = int(box.cls[0])
                         _label = names.get(_cls, str(_cls))
-                        h, w = frame.shape[:2]
-                        x1 = max(0, min(int(box.xyxy[0][0]), w - 1))
-                        y1 = max(0, min(int(box.xyxy[0][1]), h - 1))
-                        x2 = max(0, min(int(box.xyxy[0][2]), w - 1))
-                        y2 = max(0, min(int(box.xyxy[0][3]), h - 1))
+                        # Scale coordinates back to original frame size
+                        if scale < 1.0:
+                            x1 = max(0, min(int(box.xyxy[0][0] / scale), w - 1))
+                            y1 = max(0, min(int(box.xyxy[0][1] / scale), h - 1))
+                            x2 = max(0, min(int(box.xyxy[0][2] / scale), w - 1))
+                            y2 = max(0, min(int(box.xyxy[0][3] / scale), h - 1))
+                        else:
+                            x1 = max(0, min(int(box.xyxy[0][0]), w - 1))
+                            y1 = max(0, min(int(box.xyxy[0][1]), h - 1))
+                            x2 = max(0, min(int(box.xyxy[0][2]), w - 1))
+                            y2 = max(0, min(int(box.xyxy[0][3]), h - 1))
                         all_boxes.append(
                             BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, confidence=_conf, label=_label)
                         )

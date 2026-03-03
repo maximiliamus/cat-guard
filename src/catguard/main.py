@@ -114,7 +114,23 @@ def main() -> None:
 
     detection_loop = DetectionLoop(settings, on_cat_detected)
     detection_loop.set_verification_callback(tracker.on_verification)
+    
+    # Set up camera error callback (T041)
+    def on_camera_error(error_msg: str) -> None:
+        """Handle camera errors by showing notification via tray."""
+        icon = getattr(root, "_tray_icon", None)
+        if icon is not None:
+            notify_error(icon, f"Camera error: {error_msg}")
+        else:
+            logger.warning("Camera error (tray not ready): %s", error_msg)
+    
+    detection_loop.set_error_callback(on_camera_error)
+    
+    # Pre-warm camera in background before showing tray
+    # This allows 20+ seconds of initialization while UI appears
+    logger.info("Starting camera warm-up (this may take 20+ seconds)…")
     detection_loop.start()
+    detection_loop.resume()
 
     # ------------------------------------------------------------------
     # 6. Shutdown handler (SIGINT / SIGTERM)
@@ -146,6 +162,10 @@ def main() -> None:
         root, stop_event, settings, on_settings_saved, detection_loop
     )
     root._tray_icon = tray_icon  # expose to on_cat_detected via root reference
+
+    # Set initial tray icon color to green (T028)
+    from catguard.tray import update_tray_icon_color
+    update_tray_icon_color(tray_icon, detection_loop.is_tracking())
 
     if platform.system() == "Darwin":
         # macOS: pystray must run detached so tkinter can own the main thread

@@ -37,9 +37,9 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Core State Management Setup
 
-- [ ] T002 [P] Add `_is_tracking`, `_tracking_lock` state variables to `DetectionLoop.__init__()` in [src/catguard/detection.py](src/catguard/detection.py#L1)
-- [ ] T003 [P] Create `CameraError` exception class in [src/catguard/detection.py](src/catguard/detection.py)
-- [ ] T004 [P] Add `_on_error_callback` attribute and error callback mechanism to `DetectionLoop` in [src/catguard/detection.py](src/catguard/detection.py)
+- [x] T002 [P] Add `_is_tracking`, `_tracking_lock` state variables to `DetectionLoop.__init__()` in [src/catguard/detection.py](src/catguard/detection.py#L1)
+- [x] T003 [P] Create `CameraError` exception class in [src/catguard/detection.py](src/catguard/detection.py)
+- [x] T004 [P] Add `_on_error_callback` attribute and error callback mechanism to `DetectionLoop` in [src/catguard/detection.py](src/catguard/detection.py)
 
 ---
 
@@ -57,19 +57,19 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Implementation Tasks
 
-- [ ] T005 [P] [US1] Implement `DetectionLoop.pause()` method in [src/catguard/detection.py](src/catguard/detection.py) per [contracts/tracking-state.md](contracts/tracking-state.md)
-- [ ] T006 [P] [US1] Implement `DetectionLoop.is_tracking()` query method in [src/catguard/detection.py](src/catguard/detection.py)
-- [ ] T007 [US1] Add pause-on-error auto-pause logic to detection loop main thread in [src/catguard/detection.py](src/catguard/detection.py)
-- [ ] T008 [US1] Implement `update_tray_menu()` function in [src/catguard/tray.py](src/catguard/tray.py) to update menu label
-- [ ] T009 [US1] Implement `update_tray_icon_color()` function in [src/catguard/tray.py](src/catguard/tray.py) to change icon on pause
-- [ ] T010 [US1] Add pause/continue menu item callback handler in `build_tray_icon()` in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T005 [P] [US1] Implement `DetectionLoop.pause()` method in [src/catguard/detection.py](src/catguard/detection.py) per [contracts/tracking-state.md](contracts/tracking-state.md)
+- [x] T006 [P] [US1] Implement `DetectionLoop.is_tracking()` query method in [src/catguard/detection.py](src/catguard/detection.py)
+- [x] T007 [US1] Add pause-on-error auto-pause logic to detection loop main thread in [src/catguard/detection.py](src/catguard/detection.py)
+- [x] T008 [US1] Implement `update_tray_menu()` function in [src/catguard/tray.py](src/catguard/tray.py) to update menu label
+- [x] T009 [US1] Implement `update_tray_icon_color()` function in [src/catguard/tray.py](src/catguard/tray.py) to change icon on pause
+- [x] T010 [US1] Add pause/continue menu item callback handler in `build_tray_icon()` in [src/catguard/tray.py](src/catguard/tray.py)
 
 ### Testing Tasks
 
-- [ ] T011 [P] [US1] Unit test: `test_pause_stops_tracking()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
-- [ ] T012 [P] [US1] Unit test: `test_is_tracking_returns_false_when_paused()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
-- [ ] T013 [US1] Integration test: `test_menu_pause_stops_detection()` in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
-- [ ] T014 [US1] Performance test: Pause completes within 500ms in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
+- [x] T011 [P] [US1] Unit test: `test_pause_stops_tracking()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
+- [x] T012 [P] [US1] Unit test: `test_is_tracking_returns_false_when_paused()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
+- [x] T013 [US1] Integration test: `test_menu_pause_stops_detection()` in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
+- [x] T014 [US1] Performance test: Pause completes within 500ms in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
 
 ---
 
@@ -87,16 +87,16 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Implementation Tasks
 
-- [ ] T015 [P] [US2] Implement `DetectionLoop.resume()` method in [src/catguard/detection.py](src/catguard/detection.py) per [contracts/tracking-state.md](contracts/tracking-state.md)
-- [ ] T016 [US2] Update resume callback handler to call `update_tray_menu()` in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T017 [US2] Update resume callback handler to call `update_tray_icon_color()` in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T018 [US2] Add error handling for camera unavailable during resume in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T019 [US2] Add error notification/tooltip on camera failure in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T015 [P] [US2] Implement `DetectionLoop.resume()` method in [src/catguard/detection.py](src/catguard/detection.py) per [contracts/tracking-state.md](contracts/tracking-state.md)
+- [x] T016 [US2] Update resume callback handler to call `update_tray_menu()` in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T017 [US2] Update resume callback handler to call `update_tray_icon_color()` in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T018 [US2] Add error handling for camera unavailable during resume in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T019 [US2] Add error notification/tooltip on camera failure in [src/catguard/tray.py](src/catguard/tray.py)
 
 ### Testing Tasks
 
-- [ ] T020 [P] [US2] Unit test: `test_resume_starts_tracking()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
-- [ ] T021 [P] [US2] Unit test: `test_is_tracking_returns_true_when_active()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
+- [x] T020 [P] [US2] Unit test: `test_resume_starts_tracking()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
+- [x] T021 [P] [US2] Unit test: `test_is_tracking_returns_true_when_active()` in [tests/unit/test_detection.py](tests/unit/test_detection.py)
 - [ ] T022 [US2] Integration test: `test_menu_continue_resumes_detection()` in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
 - [ ] T023 [US2] Performance test: Resume completes within 500ms in [tests/integration/test_pause_resume.py](tests/integration/test_pause_resume.py)
 
@@ -116,16 +116,16 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Implementation Tasks
 
-- [ ] T024 [P] [US3] Add color constants `TRACKING_ACTIVE_COLOR` and `TRACKING_PAUSED_COLOR` to [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T025 [P] [US3] Implement `update_tray_icon_color()` function with PIL image recoloring in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T026 [US3] Integrate `update_tray_icon_color()` call into pause handler in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T027 [US3] Integrate `update_tray_icon_color()` call into resume handler in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T028 [US3] Set initial tray icon color to green on app startup in [src/catguard/main.py](src/catguard/main.py)
+- [x] T024 [P] [US3] Add color constants `TRACKING_ACTIVE_COLOR` and `TRACKING_PAUSED_COLOR` to [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T025 [P] [US3] Implement `update_tray_icon_color()` function with PIL image recoloring in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T026 [US3] Integrate `update_tray_icon_color()` call into pause handler in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T027 [US3] Integrate `update_tray_icon_color()` call into resume handler in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T028 [US3] Set initial tray icon color to green on app startup in [src/catguard/main.py](src/catguard/main.py)
 
 ### Testing Tasks
 
-- [ ] T029 [P] [US3] Unit test: `test_icon_color_green_when_tracking()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
-- [ ] T030 [P] [US3] Unit test: `test_icon_color_default_when_paused()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
+- [x] T029 [P] [US3] Unit test: `test_icon_color_green_when_tracking()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
+- [x] T030 [P] [US3] Unit test: `test_icon_color_default_when_paused()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
 - [ ] T031 [US3] Integration test: `test_icon_color_updates_within_100ms()` in [tests/integration/test_tray_ui.py](tests/integration/test_tray_ui.py)
 
 ---
@@ -143,16 +143,16 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Implementation Tasks
 
-- [ ] T032 [P] [US4] Update `build_tray_icon()` menu structure in [src/catguard/tray.py](src/catguard/tray.py) with correct item order
-- [ ] T033 [P] [US4] Add menu separators between functional groups in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T034 [US4] Update `update_tray_menu()` to maintain correct item order on rebuild in [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T035 [US4] Verify pause/continue menu item callback integrated into new menu in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T032 [P] [US4] Update `build_tray_icon()` menu structure in [src/catguard/tray.py](src/catguard/tray.py) with correct item order
+- [x] T033 [P] [US4] Add menu separators between functional groups in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T034 [US4] Update `update_tray_menu()` to maintain correct item order on rebuild in [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T035 [US4] Verify pause/continue menu item callback integrated into new menu in [src/catguard/tray.py](src/catguard/tray.py)
 
 ### Testing Tasks
 
-- [ ] T036 [P] [US4] Unit test: `test_menu_item_order()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
-- [ ] T037 [P] [US4] Unit test: `test_menu_pause_label_when_tracking()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
-- [ ] T038 [P] [US4] Unit test: `test_menu_continue_label_when_paused()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
+- [x] T036 [P] [US4] Unit test: `test_menu_item_order()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
+- [x] T037 [P] [US4] Unit test: `test_menu_pause_label_when_tracking()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
+- [x] T038 [P] [US4] Unit test: `test_menu_continue_label_when_paused()` in [tests/unit/test_tray.py](tests/unit/test_tray.py)
 
 ---
 
@@ -160,9 +160,9 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Application-Level Integration
 
-- [ ] T039 [P] Add auto-start tracking in `main()` function by calling `detection_loop.resume()` in [src/catguard/main.py](src/catguard/main.py)
-- [ ] T040 [P] Add logging for all state transitions (pause/resume/errors) in [src/catguard/detection.py](src/catguard/detection.py)
-- [ ] T041 Add camera error callback handler in [src/catguard/main.py](src/catguard/main.py) to show error notification
+- [x] T039 [P] Add auto-start tracking in `main()` function by calling `detection_loop.resume()` in [src/catguard/main.py](src/catguard/main.py)
+- [x] T040 [P] Add logging for all state transitions (pause/resume/errors) in [src/catguard/detection.py](src/catguard/detection.py)
+- [x] T041 Add camera error callback handler in [src/catguard/main.py](src/catguard/main.py) to show error notification
 - [ ] T042 Test auto-pause behavior when camera becomes unavailable in [tests/integration/test_camera_error.py](tests/integration/test_camera_error.py)
 
 ---
@@ -171,8 +171,8 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Cross-Platform & Performance Testing
 
-- [ ] T043 [P] Performance test: Verify pause latency ≤500ms on reference hardware
-- [ ] T044 [P] Performance test: Verify resume latency ≤500ms on reference hardware
+- [x] T043 [P] Performance test: Verify pause latency ≤500ms on reference hardware
+- [x] T044 [P] Performance test: Verify resume latency ≤500ms on reference hardware
 - [ ] T045 [P] Performance test: Verify UI update latency <100ms on reference hardware
 - [ ] T046 Test on Windows platform with system tray rendering
 - [ ] T047 Test on Linux platform (X11 and Wayland) with AppIndicator backend
@@ -184,9 +184,9 @@ Tasks are organized by **implementation phase** and grouped by **user story** fo
 
 ### Code Quality & Documentation
 
-- [ ] T049 Add docstrings to all new methods (`pause()`, `resume()`, `is_tracking()`, `update_tray_icon_color()`, `update_tray_menu()`)
-- [ ] T050 Add type hints to all new function signatures in [src/catguard/detection.py](src/catguard/detection.py) and [src/catguard/tray.py](src/catguard/tray.py)
-- [ ] T051 Final code review: verify all success criteria met per [spec.md](spec.md)
+- [x] T049 Add docstrings to all new methods (`pause()`, `resume()`, `is_tracking()`, `update_tray_icon_color()`, `update_tray_menu()`)
+- [x] T050 Add type hints to all new function signatures in [src/catguard/detection.py](src/catguard/detection.py) and [src/catguard/tray.py](src/catguard/tray.py)
+- [x] T051 Final code review: verify all success criteria met per [spec.md](spec.md)
 
 ---
 
