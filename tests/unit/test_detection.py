@@ -540,3 +540,116 @@ class TestVerificationCallback:
 
         assert len(pending_during_callback) == 1
         assert pending_during_callback[0] is None
+
+
+class TestPauseResume:
+    """Tests for pause/resume tracking control (T011, T012, T020, T021)."""
+
+    def test_pause_stops_tracking(self):
+        """Test that pause() stops the tracking loop (T011)."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = True
+        
+        result = loop.pause()
+        
+        assert result is True
+        assert loop._is_tracking is False
+        assert loop._stop_event.is_set()
+
+    def test_pause_idempotent_already_paused(self):
+        """Test that pause() is idempotent when already paused."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = False
+        loop._stop_event.clear()
+        
+        result = loop.pause()
+        
+        assert result is False
+        assert not loop._stop_event.is_set()
+
+    def test_resume_starts_tracking(self):
+        """Test that resume() starts the tracking loop (T020)."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = False
+        loop._stop_event.set()
+        
+        result = loop.resume()
+        
+        assert result is True
+        assert loop._is_tracking is True
+        assert not loop._stop_event.is_set()
+
+    def test_resume_idempotent_already_active(self):
+        """Test that resume() is idempotent when already active."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = True
+        loop._stop_event.clear()
+        
+        result = loop.resume()
+        
+        assert result is False
+        assert not loop._stop_event.is_set()
+
+    def test_is_tracking_returns_false_when_paused(self):
+        """Test that is_tracking() returns False when paused (T012)."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = False
+        
+        result = loop.is_tracking()
+        
+        assert result is False
+
+    def test_is_tracking_returns_true_when_active(self):
+        """Test that is_tracking() returns True when active (T021)."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = True
+        
+        result = loop.is_tracking()
+        
+        assert result is True
+
+    def test_pause_resume_thread_safety(self):
+        """Test that pause/resume are thread-safe."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop._is_tracking = False
+        
+        results = []
+        
+        def pause_worker():
+            for _ in range(10):
+                results.append(("pause", loop.pause()))
+        
+        def resume_worker():
+            for _ in range(10):
+                results.append(("resume", loop.resume()))
+        
+        t1 = threading.Thread(target=pause_worker)
+        t2 = threading.Thread(target=resume_worker)
+        
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        
+        # Should have interleaved calls without race conditions
+        assert len(results) == 20
+        # No exceptions should have been raised
+
+    def test_error_callback_registered(self):
+        """Test that error callback can be registered."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        callback = MagicMock()
+        
+        loop.set_error_callback(callback)
+        
+        assert loop._on_error_callback is callback
+
+    def test_error_callback_cleared(self):
+        """Test that error callback can be cleared."""
+        loop = DetectionLoop(Settings(), MagicMock())
+        callback = MagicMock()
+        loop.set_error_callback(callback)
+        
+        loop.set_error_callback(None)
+        
+        assert loop._on_error_callback is None
