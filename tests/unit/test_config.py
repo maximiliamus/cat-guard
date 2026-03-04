@@ -112,18 +112,6 @@ class TestScreenshotSettingsDefaults:
         s = Settings()
         assert s.screenshots_root_folder == ""
 
-    def test_screenshot_window_enabled_default_is_false(self):
-        s = Settings()
-        assert s.screenshot_window_enabled is False
-
-    def test_screenshot_window_start_default(self):
-        s = Settings()
-        assert s.screenshot_window_start == "22:00"
-
-    def test_screenshot_window_end_default(self):
-        s = Settings()
-        assert s.screenshot_window_end == "06:00"
-
 
 class TestScreenshotSettingsAssignment:
     """T003 — new fields accept valid values and persist through save/load."""
@@ -131,27 +119,6 @@ class TestScreenshotSettingsAssignment:
     def test_screenshots_root_folder_accepts_path_string(self):
         s = Settings(screenshots_root_folder="/some/path")
         assert s.screenshots_root_folder == "/some/path"
-
-    def test_screenshot_window_enabled_can_be_set_true(self):
-        s = Settings(screenshot_window_enabled=True)
-        assert s.screenshot_window_enabled is True
-
-    def test_screenshot_window_start_accepts_valid_hhmm(self):
-        s = Settings(screenshot_window_start="08:30")
-        assert s.screenshot_window_start == "08:30"
-
-    def test_screenshot_window_end_accepts_valid_hhmm(self):
-        s = Settings(screenshot_window_end="23:59")
-        assert s.screenshot_window_end == "23:59"
-
-    def test_invalid_window_start_resets_to_default(self):
-        """Malformed HH:MM resets to the default value."""
-        s = Settings(screenshot_window_start="not-a-time")
-        assert s.screenshot_window_start == "22:00"
-
-    def test_invalid_window_end_resets_to_default(self):
-        s = Settings(screenshot_window_end="99:99")
-        assert s.screenshot_window_end == "06:00"
 
 
 class TestScreenshotSettingsRoundTrip:
@@ -161,17 +128,11 @@ class TestScreenshotSettingsRoundTrip:
         config_file = tmp_path / "settings.json"
         original = Settings(
             screenshots_root_folder="/tmp/cats",
-            screenshot_window_enabled=True,
-            screenshot_window_start="21:00",
-            screenshot_window_end="07:00",
         )
         with patch("catguard.config._config_file", return_value=config_file):
             save_settings(original)
             loaded = load_settings()
         assert loaded.screenshots_root_folder == "/tmp/cats"
-        assert loaded.screenshot_window_enabled is True
-        assert loaded.screenshot_window_start == "21:00"
-        assert loaded.screenshot_window_end == "07:00"
 
     def test_legacy_settings_without_screenshot_fields_load_with_defaults(self, tmp_path):
         """Existing settings.json without new fields loads without error."""
@@ -182,7 +143,6 @@ class TestScreenshotSettingsRoundTrip:
             loaded = load_settings()
         assert loaded.camera_index == 1
         assert loaded.screenshots_root_folder == ""
-        assert loaded.screenshot_window_enabled is False
 
 
 class TestSaveSettings:
@@ -282,3 +242,79 @@ class TestAudioSettingsRoundTrip:
         assert loaded.use_default_sound is True
         assert loaded.pinned_sound == ""
 
+
+# ---------------------------------------------------------------------------
+# T004: tracking_window_* fields (007-misc-improvements)
+# ---------------------------------------------------------------------------
+
+class TestTrackingWindowDefaults:
+    """T004 — new tracking window fields have correct defaults."""
+
+    def test_tracking_window_enabled_default_false(self):
+        s = Settings()
+        assert s.tracking_window_enabled is False
+
+    def test_tracking_window_start_default(self):
+        s = Settings()
+        assert s.tracking_window_start == "08:00"
+
+    def test_tracking_window_end_default(self):
+        s = Settings()
+        assert s.tracking_window_end == "18:00"
+
+
+class TestTrackingWindowValidation:
+    """T004 — validators accept valid HH:MM and reset invalid values."""
+
+    def test_valid_tracking_window_start_accepted(self):
+        s = Settings(tracking_window_start="09:30")
+        assert s.tracking_window_start == "09:30"
+
+    def test_valid_tracking_window_end_accepted(self):
+        s = Settings(tracking_window_end="23:59")
+        assert s.tracking_window_end == "23:59"
+
+    def test_invalid_tracking_window_start_reset_to_default(self):
+        s = Settings(tracking_window_start="not-a-time")
+        assert s.tracking_window_start == "08:00"
+
+    def test_invalid_tracking_window_end_reset_to_default(self):
+        s = Settings(tracking_window_end="99:99")
+        assert s.tracking_window_end == "18:00"
+
+    def test_midnight_spanning_window_valid(self):
+        s = Settings(tracking_window_start="22:00", tracking_window_end="06:00")
+        assert s.tracking_window_start == "22:00"
+        assert s.tracking_window_end == "06:00"
+
+    def test_tracking_window_enabled_true(self):
+        s = Settings(tracking_window_enabled=True)
+        assert s.tracking_window_enabled is True
+
+
+class TestTrackingWindowBackwardCompatibility:
+    """T004 — legacy settings files load cleanly with tracking_window defaults."""
+
+    def test_legacy_file_without_tracking_window_fields(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        legacy_data = {"camera_index": 0, "cooldown_seconds": 15.0}
+        config_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+        with patch("catguard.config._config_file", return_value=config_file):
+            loaded = load_settings()
+        assert loaded.tracking_window_enabled is False
+        assert loaded.tracking_window_start == "08:00"
+        assert loaded.tracking_window_end == "18:00"
+
+    def test_tracking_window_round_trip(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        original = Settings(
+            tracking_window_enabled=True,
+            tracking_window_start="07:00",
+            tracking_window_end="20:30",
+        )
+        with patch("catguard.config._config_file", return_value=config_file):
+            save_settings(original)
+            loaded = load_settings()
+        assert loaded.tracking_window_enabled is True
+        assert loaded.tracking_window_start == "07:00"
+        assert loaded.tracking_window_end == "20:30"

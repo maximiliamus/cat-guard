@@ -10,9 +10,12 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 import numpy as np
+
+from catguard.ui.geometry import load_win_geometry, save_win_geometry
 
 if TYPE_CHECKING:
     import tkinter as tk
@@ -35,6 +38,7 @@ class MainWindow:
         self._window: tk_mod.Toplevel = tk_mod.Toplevel(root)
         self._window.title("CatGuard — Live View")
         self._window.withdraw()  # hidden until show_or_focus() called
+        self._window.resizable(False, False)
         self._window.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self._canvas: tk_mod.Canvas = tk_mod.Canvas(self._window, bg="black", highlightthickness=0)
@@ -42,10 +46,17 @@ class MainWindow:
 
         self._photo_image = None   # holds reference to prevent GC
         self._canvas_image_id = None
-        self._geometry_set = False
         self._closed = False         # set to True in _on_close; guards update_frame
         self._on_close_extra = None  # optional callback invoked just before destroy
         self._alert_label = None     # non-None while an alert sound is playing
+
+        # Restore saved window position (size is always set from the camera frame)
+        _saved_geom = load_win_geometry("main_window")
+        if _saved_geom:
+            m = re.search(r'([+-]\d+[+-]\d+)$', _saved_geom)
+            if m:
+                self._window.geometry(m.group(1))
+                logger.debug("MainWindow: restored position %s from disk.", m.group(1))
 
         # Store reference on root so callers can retrieve/check the instance
         root._main_window = self
@@ -77,16 +88,15 @@ class MainWindow:
         try:
             h, w = frame_bgr.shape[:2]
 
-            # Size the window to the frame exactly once; clamp to screen
-            if not self._geometry_set:
-                sw = self._window.winfo_screenwidth()
-                sh = self._window.winfo_screenheight()
-                cw = min(w, sw)
-                ch = min(h, sh)
-                self._window.geometry(f"{cw}x{ch}")
-                self._canvas.config(width=cw, height=ch)
-                self._geometry_set = True
-                logger.debug("MainWindow geometry set to %dx%d (frame=%dx%d).", cw, ch, w, h)
+            # Resize window and canvas to match the frame every update;
+            # clamp to screen dimensions in case of unusually large cameras.
+            sw = self._window.winfo_screenwidth()
+            sh = self._window.winfo_screenheight()
+            cw = min(w, sw)
+            ch = min(h, sh)
+            self._window.geometry(f"{cw}x{ch}")
+            self._canvas.config(width=cw, height=ch)
+            logger.debug("MainWindow geometry: %dx%d (frame=%dx%d).", cw, ch, w, h)
 
             # Draw bounding-box overlays onto a copy of the frame
             annotated = draw_detections(frame_bgr, detections)
@@ -145,6 +155,11 @@ class MainWindow:
     def _on_close(self) -> None:
         """Destroy the window and clear the reference on root."""
         logger.info("MainWindow closed.")
+        # Persist geometry before destroying so position/size survives restarts
+        try:
+            save_win_geometry("main_window", self._window.geometry())
+        except Exception:
+            pass
         self._root._main_window_visible = False
         self._closed = True  # guard: drop any update_frame callbacks still queued
         if self._on_close_extra is not None:

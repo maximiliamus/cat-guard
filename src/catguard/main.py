@@ -6,6 +6,7 @@ Run as:
 """
 from __future__ import annotations
 
+import locale
 import logging
 import platform
 import signal
@@ -47,12 +48,23 @@ def main() -> None:
     from catguard.audio import init_audio, play_alert, shutdown_audio
     from catguard.config import load_settings, save_settings
     from catguard.detection import DetectionEvent, DetectionLoop
+    from catguard.sleep_watcher import SleepWatcher
+    from catguard.time_window import TimeWindowMonitor, _is_in_window
     from catguard.tray import build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
     # 1. Logging
     # ------------------------------------------------------------------
     _configure_logging()
+
+    # ------------------------------------------------------------------
+    # 1b. Locale (T020 / FR-021: read OS locale for date/time formatting)
+    # ------------------------------------------------------------------
+    try:
+        locale.setlocale(locale.LC_TIME, "")
+        logger.info("Locale set to system default: %s", locale.getlocale(locale.LC_TIME))
+    except locale.Error as exc:
+        logger.warning("Could not set system locale for LC_TIME: %s", exc)
 
     # ------------------------------------------------------------------
     # 2. Settings (shared mutable object — all modules hold a reference)
@@ -133,10 +145,62 @@ def main() -> None:
     detection_loop.resume()
 
     # ------------------------------------------------------------------
+    # 5b. TimeWindowMonitor — auto-pause/resume based on time window (T009)
+    # ------------------------------------------------------------------
+    _was_tracking = [True]  # reflects intentional (non-error) tracking state
+
+    def on_tracking_state_changed(is_tracking: bool) -> None:
+        """Called by TimeWindowMonitor and tray state callbacks."""
+        _was_tracking[0] = is_tracking
+        icon = getattr(root, "_tray_icon", None)
+        if icon is not None:
+            from catguard.tray import update_tray_icon_color, update_tray_menu
+            update_tray_icon_color(icon, is_tracking)
+            update_tray_menu(
+                icon, is_tracking, root, settings, on_settings_saved,
+                detection_loop, time_window_monitor,
+            )
+        logger.info("Tracking state changed: is_tracking=%s", is_tracking)
+
+    time_window_monitor = TimeWindowMonitor(
+        detection_loop, settings, on_tracking_state_changed
+    )
+    root._on_tracking_state_changed = on_tracking_state_changed
+
+    # ------------------------------------------------------------------
+    # 5c. SleepWatcher — detect system wake and restore camera (T014)
+    # ------------------------------------------------------------------
+    def on_wake() -> None:
+        """Called by SleepWatcher after detecting a system wake event."""
+        logger.info("System wake detected (SleepWatcher).")
+        if not _was_tracking[0]:
+            logger.info("on_wake: detection was paused before sleep — not restoring.")
+            return
+        # FR-007: evaluate time window before restoring
+        if settings.tracking_window_enabled:
+            from datetime import datetime
+            now = datetime.now().time()
+            if not _is_in_window(now, settings.tracking_window_start, settings.tracking_window_end):
+                logger.info(
+                    "on_wake: current time is outside tracking window — not restoring camera."
+                )
+                return
+        logger.info("on_wake: restoring camera after sleep.")
+        try:
+            detection_loop.resume()
+            on_tracking_state_changed(True)
+        except Exception:
+            logger.exception("on_wake: failed to resume detection loop.")
+
+    sleep_watcher = SleepWatcher(on_wake=on_wake)
+
+    # ------------------------------------------------------------------
     # 6. Shutdown handler (SIGINT / SIGTERM)
     # ------------------------------------------------------------------
     def on_shutdown(*_args) -> None:
         logger.info("Shutting down CatGuard…")
+        time_window_monitor.stop()
+        sleep_watcher.stop()
         detection_loop.stop()
         shutdown_audio()
         stop_event.set()
@@ -159,13 +223,17 @@ def main() -> None:
     # 8. Tray + tkinter main loop
     # ------------------------------------------------------------------
     tray_icon = build_tray_icon(
-        root, stop_event, settings, on_settings_saved, detection_loop
+        root, stop_event, settings, on_settings_saved, detection_loop, time_window_monitor
     )
     root._tray_icon = tray_icon  # expose to on_cat_detected via root reference
 
     # Set initial tray icon color to green (T028)
     from catguard.tray import update_tray_icon_color
     update_tray_icon_color(tray_icon, detection_loop.is_tracking())
+
+    # Start background monitors after tray is ready
+    time_window_monitor.start()
+    sleep_watcher.start()
 
     if platform.system() == "Darwin":
         # macOS: pystray must run detached so tkinter can own the main thread
@@ -186,9 +254,9 @@ def _configure_logging() -> None:
     Log files are written to the platform user log directory.
     """
     import logging.handlers
-    from platformdirs import user_log_dir
+    from platformdirs import user_data_dir
 
-    log_dir = Path(user_log_dir("CatGuard"))
+    log_dir = Path(user_data_dir("CatGuard")) / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / "catguard.log"
 
