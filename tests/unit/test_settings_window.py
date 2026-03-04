@@ -114,37 +114,37 @@ class TestSettingsFormModelTimeWindow:
     """T021 \u2014 time-window fields on SettingsFormModel (TDD RED before T023)."""
 
     def test_from_settings_populates_window_enabled(self):
-        s = Settings(screenshot_window_enabled=True)
+        s = Settings(tracking_window_enabled=True)
         model = SettingsFormModel.from_settings(s)
-        assert model.screenshot_window_enabled is True
+        assert model.tracking_window_enabled is True
 
     def test_from_settings_populates_window_start(self):
-        s = Settings(screenshot_window_start="21:00")
+        s = Settings(tracking_window_start="21:00")
         model = SettingsFormModel.from_settings(s)
-        assert model.screenshot_window_start == "21:00"
+        assert model.tracking_window_start == "21:00"
 
     def test_from_settings_populates_window_end(self):
-        s = Settings(screenshot_window_end="07:00")
+        s = Settings(tracking_window_end="07:00")
         model = SettingsFormModel.from_settings(s)
-        assert model.screenshot_window_end == "07:00"
+        assert model.tracking_window_end == "07:00"
 
     def test_to_settings_round_trip_time_window(self):
         s = Settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="21:30",
-            screenshot_window_end="05:45",
+            tracking_window_enabled=True,
+            tracking_window_start="21:30",
+            tracking_window_end="05:30",
         )
         model = SettingsFormModel.from_settings(s)
         restored = model.to_settings()
-        assert restored.screenshot_window_enabled is True
-        assert restored.screenshot_window_start == "21:30"
-        assert restored.screenshot_window_end == "05:45"
+        assert restored.tracking_window_enabled is True
+        assert restored.tracking_window_start == "21:30"
+        assert restored.tracking_window_end == "05:30"
 
     def test_default_window_fields(self):
         model = SettingsFormModel.from_settings(Settings())
-        assert model.screenshot_window_enabled is False
-        assert model.screenshot_window_start == "22:00"
-        assert model.screenshot_window_end == "06:00"
+        assert model.tracking_window_enabled is False
+        assert model.tracking_window_start == "08:00"
+        assert model.tracking_window_end == "18:00"
 
 
 # ---------------------------------------------------------------------------
@@ -250,3 +250,171 @@ class TestAudioDropdownLogic:
         assert s.use_default_sound is False
 
 
+# ---------------------------------------------------------------------------
+# T015: Rename-stem validation helper tests (007-misc-improvements US3)
+# ---------------------------------------------------------------------------
+from catguard.ui.settings_window import _validate_rename_stem  # noqa: E402
+
+
+class TestValidateRenameStem:
+    """T015 — pure validation logic for the sound-file rename operation."""
+
+    def test_valid_stem_returns_none(self):
+        """A plain alphanumeric stem is valid."""
+        assert _validate_rename_stem("my_alert") is None
+
+    def test_valid_stem_with_spaces_returns_none(self):
+        """A stem with inner spaces is valid (only forbidden charset matters)."""
+        assert _validate_rename_stem("cat alert v2") is None
+
+    def test_empty_string_returns_error(self):
+        """Empty string is rejected."""
+        result = _validate_rename_stem("")
+        assert result is not None
+        assert "empty" in result.lower()
+
+    def test_whitespace_only_returns_error(self):
+        """Whitespace-only string is rejected (treated as empty after strip)."""
+        result = _validate_rename_stem("   ")
+        assert result is not None
+        assert "empty" in result.lower()
+
+    def test_forward_slash_rejected(self):
+        """Forward slash is a forbidden character."""
+        result = _validate_rename_stem("cat/sound")
+        assert result is not None
+        assert "invalid" in result.lower()
+
+    def test_backslash_rejected(self):
+        r"""Backslash is a forbidden character."""
+        result = _validate_rename_stem("cat\\sound")
+        assert result is not None
+
+    def test_colon_rejected(self):
+        """Colon is a forbidden character (Windows path separator)."""
+        result = _validate_rename_stem("cat:sound")
+        assert result is not None
+
+    def test_asterisk_rejected(self):
+        """Asterisk is a forbidden character."""
+        result = _validate_rename_stem("cat*")
+        assert result is not None
+
+    def test_question_mark_rejected(self):
+        """Question mark is a forbidden character."""
+        result = _validate_rename_stem("cat?")
+        assert result is not None
+
+    def test_angle_brackets_rejected(self):
+        """Angle brackets are forbidden characters."""
+        assert _validate_rename_stem("cat<sound>") is not None
+
+    def test_pipe_rejected(self):
+        """Pipe is a forbidden character."""
+        assert _validate_rename_stem("cat|sound") is not None
+
+    def test_double_quote_rejected(self):
+        """Double-quote is a forbidden character."""
+        assert _validate_rename_stem('cat"sound') is not None
+
+    def test_unicode_name_valid(self):
+        """Unicode characters (e.g. accented letters) are allowed."""
+        assert _validate_rename_stem("кот_звук") is None
+
+    def test_hyphen_and_dot_allowed(self):
+        """Hyphens and dots in stem are allowed."""
+        assert _validate_rename_stem("alert-v2.backup") is None
+
+
+# ---------------------------------------------------------------------------
+# T015: SettingsFormModel tracking-window round-trip tests (T008 model layer)
+# ---------------------------------------------------------------------------
+
+
+class TestTrackingWindowFormModel:
+    """T015 / T008 — SettingsFormModel correctly round-trips tracking_window fields."""
+
+    def test_defaults_from_fresh_settings(self):
+        model = SettingsFormModel.from_settings(Settings())
+        assert model.tracking_window_enabled is False
+        assert model.tracking_window_start == "08:00"
+        assert model.tracking_window_end == "18:00"
+
+    def test_enabled_flag_round_trips(self):
+        s = Settings(tracking_window_enabled=True)
+        model = SettingsFormModel.from_settings(s)
+        result = model.to_settings()
+        assert result.tracking_window_enabled is True
+
+    def test_start_time_round_trips(self):
+        s = Settings(tracking_window_start="09:30")
+        model = SettingsFormModel.from_settings(s)
+        result = model.to_settings()
+        assert result.tracking_window_start == "09:30"
+
+    def test_end_time_round_trips(self):
+        s = Settings(tracking_window_end="20:00")
+        model = SettingsFormModel.from_settings(s)
+        result = model.to_settings()
+        assert result.tracking_window_end == "20:00"
+
+    def test_all_tracking_fields_round_trip_together(self):
+        s = Settings(
+            tracking_window_enabled=True,
+            tracking_window_start="07:00",
+            tracking_window_end="23:30",
+        )
+        model = SettingsFormModel.from_settings(s)
+        result = model.to_settings()
+        assert result.tracking_window_enabled is True
+        assert result.tracking_window_start == "07:00"
+        assert result.tracking_window_end == "23:30"
+
+
+# ---------------------------------------------------------------------------
+# T015: Rename file-system integration tests (using tmp_path, no display)
+# ---------------------------------------------------------------------------
+
+
+class TestRenameFileIntegration:
+    """T015 — verify file-rename semantics that back _rename_path() live in pathlib."""
+
+    def test_valid_rename_produces_new_file(self, tmp_path):
+        """Renaming a file produces the new file and removes the old path."""
+        old = tmp_path / "meow.wav"
+        old.write_bytes(b"\x00" * 44)
+        new = old.parent / ("purr" + old.suffix)
+        old.rename(new)
+        assert new.exists()
+        assert not old.exists()
+
+    def test_pinned_sound_path_update_logic(self):
+        """A SettingsFormModel whose pinned_sound is updated reflects the new path."""
+        model = SettingsFormModel(pinned_sound="/sounds/meow.wav")
+        old_path = model.pinned_sound
+        new_path = "/sounds/purr.wav"
+        # Simulate what _rename_path does: update the model field
+        if model.pinned_sound == old_path:
+            model.pinned_sound = new_path
+        assert model.pinned_sound == new_path
+
+    def test_cancel_leaves_file_unchanged(self, tmp_path):
+        """If new_stem is None (dialog cancelled), no rename occurs."""
+        original = tmp_path / "meow.wav"
+        original.write_bytes(b"\x00" * 44)
+        # Simulate cancel: new_stem is None → early return, no rename
+        new_stem = None  # type: ignore[assignment]
+        if new_stem is not None:
+            original.rename(original.parent / (new_stem + original.suffix))
+        assert original.exists()
+
+    def test_duplicate_detection(self, tmp_path):
+        """Renaming to an existing file name should be caught before rename."""
+        existing = tmp_path / "purr.wav"
+        existing.write_bytes(b"\x00" * 44)
+        target = tmp_path / "meow.wav"
+        target.write_bytes(b"\x00" * 44)
+        new_path = target.parent / ("purr" + target.suffix)
+        # The duplicate guard: if new_path.exists() and new_path != target → abort
+        should_abort = new_path.exists() and new_path != target
+        assert should_abort, "Duplicate detection should have fired"

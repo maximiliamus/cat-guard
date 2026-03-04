@@ -19,7 +19,7 @@ Three new fields added to support the tracking time window (FR-001 through FR-00
 | `tracking_window_start` | `str` | `"08:00"` | Start of the daily active monitoring period in `HH:MM` (local 24-hour time). |
 | `tracking_window_end` | `str` | `"18:00"` | End of the daily active monitoring period in `HH:MM` (local 24-hour time). May precede `tracking_window_start` to span midnight (e.g., `"22:00"` → `"06:00"`). |
 
-**Validation rules** (mirrors existing `screenshot_window_*` validators):
+**Validation rules**:
 - `tracking_window_start` and `tracking_window_end` must match `HH:MM` format (regex `^\d{2}:\d{2}$`).
 - If `tracking_window_start == tracking_window_end`, the window is treated as zero-length and effectively disabled at runtime.
 

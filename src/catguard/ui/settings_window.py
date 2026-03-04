@@ -11,9 +11,11 @@ import logging
 import sys
 import threading
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, List
 
 from catguard.config import Settings
+from catguard.ui.geometry import load_win_geometry, save_win_geometry
 from catguard.detection import Camera, list_cameras
 
 logger = logging.getLogger(__name__)
@@ -33,12 +35,13 @@ class SettingsFormModel:
     autostart: bool = False
     # Screenshot fields (T013 / T023)
     screenshots_root_folder: str = ""
-    screenshot_window_enabled: bool = False
-    screenshot_window_start: str = "22:00"
-    screenshot_window_end: str = "06:00"
     # Audio playback fields (T004)
     use_default_sound: bool = True
     pinned_sound: str = ""
+    # Tracking time window fields (T002 / 007-misc-improvements)
+    tracking_window_enabled: bool = False
+    tracking_window_start: str = "08:00"
+    tracking_window_end: str = "18:00"
 
     # ------------------------------------------------------------------
     # Factory
@@ -54,11 +57,11 @@ class SettingsFormModel:
             sound_library_paths=list(s.sound_library_paths),
             autostart=s.autostart,
             screenshots_root_folder=s.screenshots_root_folder,
-            screenshot_window_enabled=s.screenshot_window_enabled,
-            screenshot_window_start=s.screenshot_window_start,
-            screenshot_window_end=s.screenshot_window_end,
             use_default_sound=s.use_default_sound,
             pinned_sound=s.pinned_sound,
+            tracking_window_enabled=s.tracking_window_enabled,
+            tracking_window_start=s.tracking_window_start,
+            tracking_window_end=s.tracking_window_end,
         )
 
     # ------------------------------------------------------------------
@@ -74,11 +77,11 @@ class SettingsFormModel:
             sound_library_paths=list(self.sound_library_paths),
             autostart=self.autostart,
             screenshots_root_folder=self.screenshots_root_folder,
-            screenshot_window_enabled=self.screenshot_window_enabled,
-            screenshot_window_start=self.screenshot_window_start,
-            screenshot_window_end=self.screenshot_window_end,
             use_default_sound=self.use_default_sound,
             pinned_sound=self.pinned_sound,
+            tracking_window_enabled=self.tracking_window_enabled,
+            tracking_window_start=self.tracking_window_start,
+            tracking_window_end=self.tracking_window_end,
         )
 
     # ------------------------------------------------------------------
@@ -96,8 +99,35 @@ class SettingsFormModel:
 
 
 # ---------------------------------------------------------------------------
+# Pure helpers (unit-testable without a display)
+# ---------------------------------------------------------------------------
+
+_FORBIDDEN_STEM_CHARS: frozenset[str] = frozenset(r'\/:*?"<>|')
+
+
+def _validate_rename_stem(new_stem: str) -> str | None:
+    """Validate a proposed file stem for a rename operation.
+
+    Returns ``None`` if the stem is valid, or a human-readable error string
+    if it is not.  Intentionally free of tkinter so it can be unit-tested.
+    """
+    stripped = new_stem.strip()
+    if not stripped:
+        return "Name cannot be empty."
+    if any(c in _FORBIDDEN_STEM_CHARS for c in stripped):
+        bad = ", ".join(sorted(c for c in stripped if c in _FORBIDDEN_STEM_CHARS))
+        return f"Name contains invalid characters: {bad}"
+    return None
+
+
+# ---------------------------------------------------------------------------
 # tkinter window (display-dependent; not unit-tested here)
 # ---------------------------------------------------------------------------
+
+# Mutable cell — persists saved geometry across multiple settings-window sessions
+# within a process; initialised from disk so it survives restarts.
+_settings_win_geometry: list[str] = [load_win_geometry("settings_window")]
+
 
 def open_settings_window(root, settings: Settings, on_settings_saved: Callable) -> None:
     """Open the Settings window as a modal tkinter Toplevel.
@@ -141,6 +171,15 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     win.title("CatGuard — Settings")
     win.resizable(False, False)
     win.grab_set()  # modal
+
+    # Restore saved position, or centre on root
+    win.update_idletasks()
+    if _settings_win_geometry[0]:
+        win.geometry(_settings_win_geometry[0])
+    else:
+        rw = root.winfo_rootx() + root.winfo_width() // 2
+        rh = root.winfo_rooty() + root.winfo_height() // 2
+        win.geometry(f"+{rw - win.winfo_reqwidth() // 2}+{rh - win.winfo_reqheight() // 2}")
 
     pad = {"padx": 8, "pady": 4}
 
@@ -229,11 +268,130 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         from catguard.audio import _play_async
         _play_async(path)
 
+    # Mutable cell to persist rename dialog geometry across invocations;
+    # seed from disk so position is remembered across restarts.
+    _rename_dlg_geometry = [load_win_geometry("rename_dialog") or None]
+
+    def _rename_path():
+        """Rename the selected sound file on disk and update the UI. (T016)"""
+        sel = path_listbox.curselection()
+        if not sel:
+            return
+        path = path_listbox.get(sel[0])
+        # Stop any active playback before showing dialog
+        try:
+            import pygame.mixer  # noqa: PLC0415
+            pygame.mixer.stop()
+            logger.debug("_rename_path: stopped pygame mixer before dialog.")
+        except Exception:
+            logger.debug("_rename_path: pygame.mixer.stop() not available.")
+        current_stem = Path(path).stem
+
+        # Custom resizable rename dialog — Entry expands with the window
+        _result = [None]
+        dlg = tk.Toplevel(win)
+        dlg.title("Rename Sound")
+        dlg.resizable(True, False)
+        dlg.grab_set()
+        dlg.transient(win)
+
+        tk.Label(dlg, text="New name:").grid(row=0, column=0, padx=(8, 4), pady=(12, 4), sticky="w")
+        name_var = tk.StringVar(value=current_stem)
+        name_entry = tk.Entry(dlg, textvariable=name_var)
+        name_entry.grid(row=0, column=1, padx=(0, 8), pady=(12, 4), sticky="ew")
+        name_entry.icursor(tk.END)
+        name_entry.select_range(0, tk.END)
+
+        dlg.columnconfigure(1, weight=1)
+
+        def _ok(event=None):
+            _result[0] = name_var.get()
+            _rename_dlg_geometry[0] = dlg.geometry()
+            save_win_geometry("rename_dialog", _rename_dlg_geometry[0])
+            dlg.destroy()
+
+        def _cancel(event=None):
+            _rename_dlg_geometry[0] = dlg.geometry()
+            save_win_geometry("rename_dialog", _rename_dlg_geometry[0])
+            dlg.destroy()
+
+        btn_row_dlg = tk.Frame(dlg)
+        btn_row_dlg.grid(row=1, column=0, columnspan=2, pady=(4, 10))
+        tk.Button(btn_row_dlg, text="OK", command=_ok, width=8).pack(side="left", padx=4)
+        tk.Button(btn_row_dlg, text="Cancel", command=_cancel, width=8).pack(side="left", padx=4)
+
+        dlg.bind("<Return>", _ok)
+        dlg.bind("<Escape>", _cancel)
+        dlg.protocol("WM_DELETE_WINDOW", _cancel)
+
+        # Restore saved geometry, or let tkinter size naturally then centre on parent
+        if _rename_dlg_geometry[0]:
+            dlg.geometry(_rename_dlg_geometry[0])
+        else:
+            dlg.update_idletasks()
+            pw = win.winfo_rootx() + win.winfo_width() // 2
+            ph = win.winfo_rooty() + win.winfo_height() // 2
+            dlg.geometry(f"+{pw - dlg.winfo_reqwidth() // 2}+{ph - dlg.winfo_reqheight() // 2}")
+
+        name_entry.focus_set()
+        dlg.wait_window()
+
+        # Always return focus to the listbox and restore the selection.
+        # selection_set() does not fire <<ListboxSelect>>, so update the
+        # rename button state manually afterwards.
+        path_listbox.focus_set()
+        path_listbox.selection_set(sel[0])
+        path_listbox.see(sel[0])
+        _update_rename_btn_state()
+
+        new_stem = _result[0]
+        if new_stem is None:  # user cancelled
+            return
+        err = _validate_rename_stem(new_stem)
+        if err:
+            messagebox.showerror("Invalid Name", err, parent=win)
+            return
+        new_stem = new_stem.strip()
+        new_path = Path(path).parent / (new_stem + Path(path).suffix)
+        if new_path == Path(path):
+            logger.debug("_rename_path: name unchanged ('%s') — skipping.", new_stem)
+            return
+        if new_path.exists() and new_path != Path(path):
+            messagebox.showerror(
+                "Duplicate Name", f"'{new_stem}' already exists.", parent=win
+            )
+            return
+        try:
+            Path(path).rename(new_path)
+        except OSError as exc:
+            messagebox.showerror("Rename Error", str(exc), parent=win)
+            logger.error("_rename_path: failed to rename %s → %s: %s", path, new_path, exc)
+            return
+        # Update listbox entry in-place
+        path_listbox.delete(sel[0])
+        path_listbox.insert(sel[0], str(new_path))
+        path_listbox.selection_set(sel[0])
+        path_listbox.see(sel[0])
+        # Update pinned_var if this sound was the pinned selection
+        if _pinned_var_holder and _pinned_var_holder[0].get() == path:
+            _pinned_var_holder[0].set(str(new_path))
+        _refresh_sound_combobox()
+        logger.info("Sound file renamed: %s → %s", path, new_path)
+
     btn_frame = tk.Frame(win)
     btn_frame.grid(row=4, column=1, sticky="w", **pad)
     tk.Button(btn_frame, text="Add…", command=_add_path).pack(side="left", padx=2)
     tk.Button(btn_frame, text="Remove", command=_remove_path).pack(side="left", padx=2)
     tk.Button(btn_frame, text="▶ Play", command=_play_selected).pack(side="left", padx=2)
+    rename_btn = tk.Button(btn_frame, text="Rename", command=_rename_path, state="disabled")
+    rename_btn.pack(side="left", padx=2)
+
+    def _update_rename_btn_state(*_):
+        rename_btn.config(
+            state="normal" if path_listbox.curselection() else "disabled"
+        )
+
+    path_listbox.bind("<<ListboxSelect>>", _update_rename_btn_state)
 
     # ---- Sound Alerts section ------------------------------------------
     tk.Label(win, text="Sound Alerts:", font=(None, 9, "bold")).grid(
@@ -486,46 +644,56 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         font=(None, 8),
     ).grid(row=12, column=1, sticky="w", **pad)
 
-    # Time window subsection (T024) ----------------------------------------
-    win_enabled_var = tk.BooleanVar(value=model.screenshot_window_enabled)
+    # ---- Active Monitoring Window section (T008 / 007-misc-improvements) ----
+    tk.Label(win, text="Active Monitoring\nWindow:", font=(None, 9, "bold")).grid(
+        row=15, column=0, sticky="nw", **pad
+    )
+    track_win_enabled_var = tk.BooleanVar(value=model.tracking_window_enabled)
     tk.Checkbutton(
         win,
-        text="Only save screenshots within a daily time window",
-        variable=win_enabled_var,
-    ).grid(row=13, column=1, sticky="w", **pad)
+        text="Only monitor within a daily time window",
+        variable=track_win_enabled_var,
+    ).grid(row=15, column=1, sticky="w", **pad)
 
-    win_start_var = tk.StringVar(value=model.screenshot_window_start)
-    win_end_var = tk.StringVar(value=model.screenshot_window_end)
+    track_win_start_var = tk.StringVar(value=model.tracking_window_start)
+    track_win_end_var = tk.StringVar(value=model.tracking_window_end)
 
-    tw_frame = tk.Frame(win)
-    tw_frame.grid(row=14, column=1, sticky="w", **pad)
-    tk.Label(tw_frame, text="From:").pack(side="left")
-    start_spin = tk.Spinbox(
-        tw_frame, textvariable=win_start_var, values=(
-            *(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),
-        ),
+    tw_track_frame = tk.Frame(win)
+    tw_track_frame.grid(row=16, column=1, sticky="w", **pad)
+    tk.Label(tw_track_frame, text="From:").pack(side="left")
+    track_start_spin = tk.Spinbox(
+        tw_track_frame,
+        textvariable=track_win_start_var,
+        values=(*(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),),
         width=6,
     )
-    start_spin.pack(side="left", padx=(2, 6))
-    tk.Label(tw_frame, text="To:").pack(side="left")
-    end_spin = tk.Spinbox(
-        tw_frame, textvariable=win_end_var, values=(
-            *(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),
-        ),
+    track_start_spin.pack(side="left", padx=(2, 6))
+    tk.Label(tw_track_frame, text="To:").pack(side="left")
+    track_end_spin = tk.Spinbox(
+        tw_track_frame,
+        textvariable=track_win_end_var,
+        values=(*(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),),
         width=6,
     )
-    end_spin.pack(side="left", padx=2)
+    track_end_spin.pack(side="left", padx=2)
 
-    def _update_tw_state(*_):
-        state = "normal" if win_enabled_var.get() else "disabled"
-        start_spin.config(state=state)
-        end_spin.config(state=state)
+    def _update_track_tw_state(*_):
+        state = "normal" if track_win_enabled_var.get() else "disabled"
+        track_start_spin.config(state=state)
+        track_end_spin.config(state=state)
 
-    win_enabled_var.trace_add("write", _update_tw_state)
-    _update_tw_state()  # set initial state
+    track_win_enabled_var.trace_add("write", _update_track_tw_state)
+    _update_track_tw_state()  # set initial state
 
     # ---- Buttons ---------------------------------------------------------
     def _on_close():
+        # Persist window geometry before destroying — save to both in-process
+        # cell and on-disk file so position/size survives restarts.
+        try:
+            _settings_win_geometry[0] = win.geometry()
+            save_win_geometry("settings_window", _settings_win_geometry[0])
+        except Exception:
+            pass
         # Stop any ongoing recording cleanly
         if _recorder_holder and _recorder_holder[0].is_recording:
             _recorder_holder[0].stop()
@@ -556,14 +724,15 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         new_autostart = auto_var.get()
         model.autostart = new_autostart
         model.screenshots_root_folder = folder_var.get()
-        model.screenshot_window_enabled = win_enabled_var.get()
-        model.screenshot_window_start = win_start_var.get()
-        model.screenshot_window_end = win_end_var.get()
         # T016: persist audio playback settings
         model.use_default_sound = use_default_var.get()
         # T021: persist pinned_sound ("All" → empty string)
         selected = pinned_var.get()
         model.pinned_sound = "" if selected == "All" else selected
+        # T008: persist tracking window settings
+        model.tracking_window_enabled = track_win_enabled_var.get()
+        model.tracking_window_start = track_win_start_var.get()
+        model.tracking_window_end = track_win_end_var.get()
 
         # Apply autostart change if it differs from current
         if new_autostart and not is_autostart_enabled():
@@ -578,7 +747,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         _on_close()
 
     btn_row = tk.Frame(win)
-    btn_row.grid(row=15, column=0, columnspan=2, pady=8)
+    btn_row.grid(row=17, column=0, columnspan=2, pady=8)
     tk.Button(btn_row, text="Save", command=_save, width=10).pack(side="left", padx=4)
     tk.Button(btn_row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=4)
 

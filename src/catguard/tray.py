@@ -66,6 +66,7 @@ def build_tray_icon(
     settings: Settings,
     on_settings_saved: Callable,
     detection_loop,
+    time_window_monitor=None,
 ) -> pystray.Icon:
     """Build and return a pystray.Icon configured with menu items including Pause/Continue.
 
@@ -94,12 +95,16 @@ def build_tray_icon(
         if is_tracking:
             detection_loop.pause()
             update_tray_icon_color(icon, False)
-            update_tray_menu(icon, False, root, settings, on_settings_saved, detection_loop)
+            update_tray_menu(icon, False, root, settings, on_settings_saved, detection_loop, time_window_monitor)
+            _notify_state(root, False)
         else:
             try:
+                if time_window_monitor is not None:
+                    time_window_monitor.notify_user_resume()
                 detection_loop.resume()
                 update_tray_icon_color(icon, True)
-                update_tray_menu(icon, True, root, settings, on_settings_saved, detection_loop)
+                update_tray_menu(icon, True, root, settings, on_settings_saved, detection_loop, time_window_monitor)
+                _notify_state(root, True)
             except Exception as exc:
                 logger.error("Failed to resume tracking: %s", exc)
                 notify_error(icon, f"Failed to resume: {exc}")
@@ -152,8 +157,8 @@ def update_tray_icon_color(icon: pystray.Icon, is_tracking: bool) -> None:
         logger.warning("Could not update tray icon color: %s", exc)
 
 
-def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings, 
-                    on_settings_saved, detection_loop) -> None:
+def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
+                    on_settings_saved, detection_loop, time_window_monitor=None) -> None:
     """Rebuild tray menu with correct Pause/Continue label.
 
     Args:
@@ -178,12 +183,16 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
             if is_tracking:
                 detection_loop.pause()
                 update_tray_icon_color(icon, False)
-                update_tray_menu(icon, False, root, settings, on_settings_saved, detection_loop)
+                update_tray_menu(icon, False, root, settings, on_settings_saved, detection_loop, time_window_monitor)
+                _notify_state(root, False)
             else:
                 try:
+                    if time_window_monitor is not None:
+                        time_window_monitor.notify_user_resume()
                     detection_loop.resume()
                     update_tray_icon_color(icon, True)
-                    update_tray_menu(icon, True, root, settings, on_settings_saved, detection_loop)
+                    update_tray_menu(icon, True, root, settings, on_settings_saved, detection_loop, time_window_monitor)
+                    _notify_state(root, True)
                 except Exception as exc:
                     logger.error("Failed to resume tracking: %s", exc)
                     notify_error(icon, f"Failed to resume: {exc}")
@@ -225,6 +234,16 @@ def _on_settings(root, settings: Settings, on_settings_saved: Callable) -> None:
     from catguard.ui.settings_window import open_settings_window
 
     root.after(0, lambda: open_settings_window(root, settings, on_settings_saved))
+
+
+def _notify_state(root, is_tracking: bool) -> None:
+    """Call root._on_tracking_state_changed if registered (for main.py state tracking)."""
+    cb = getattr(root, "_on_tracking_state_changed", None)
+    if cb is not None:
+        try:
+            cb(is_tracking)
+        except Exception:
+            logger.debug("_notify_state: callback raised.", exc_info=True)
 
 
 def _on_exit(icon: pystray.Icon, root, stop_event: threading.Event) -> None:

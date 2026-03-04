@@ -87,7 +87,7 @@ See [research.md](research.md) for full findings. Summary of decisions:
 | R-003 | Off-screen label placement | Refactor `_draw_labelled_box()` to test 5 candidate positions in spec order |
 | R-004 | Rename during active playback | `pygame.mixer.stop()` before dialog; file not held open after stop |
 | R-005 | Time window polling & state | 30 s poll; `_monitor_paused` flag guards against overriding manual pause |
-| R-006 | Separate tracking vs screenshot window | New `tracking_window_*` fields; do not reuse `screenshot_window_*` |
+| R-006 | Separate tracking vs screenshot window | `tracking_window_*` fields added; `screenshot_window_*` subsequently removed — `tracking_window_*` now governs both screenshot and detection windows (post-implementation consolidation) |
 
 ## Phase 1: Design
 
@@ -136,3 +136,32 @@ See [contracts/config.md](contracts/config.md) for updated Settings schema.
 ## Complexity Tracking
 
 No constitution violations. All changes are straightforward extensions of existing patterns.
+
+---
+
+## Amendments (post-implementation polish)
+
+Changes made after the original spec was completed:
+
+### A-001 — `screenshot_window_*` fields removed
+`screenshot_window_enabled/start/end` were removed from `Settings` and from the UI. `tracking_window_*` now governs both detection and screenshot time-gating. Existing settings files with the old keys silently ignore them on load.
+
+### A-002 — Window geometry persistence
+New module `src/catguard/ui/geometry.py` provides `load_win_geometry(key)` / `save_win_geometry(key, value)`. Geometry is stored in `%APPDATA%\CatGuard\windows.json` (one JSON dict keyed by window name). Three windows persist geometry across restarts:
+
+| Key | Window |
+|-----|--------|
+| `settings_window` | Settings Toplevel (position + size) |
+| `rename_dialog` | Rename sound dialog (position + size) |
+| `main_window` | Live-view window (position only; size is always set from the camera frame) |
+
+### A-003 — Main window unresizable, always fits frame
+`MainWindow` now calls `resizable(False, False)`. The window and canvas are resized to match the camera frame dimensions on **every** `update_frame()` call (not just the first). On startup, only the saved position (`+X+Y`) is restored from disk; size is never cached.
+
+### A-004 — Log directory
+Application log moved from `platformdirs.user_log_dir("CatGuard")` to `user_data_dir("CatGuard") / "logs"` so all runtime data (settings, geometry, alerts, logs) lives under a single `%APPDATA%\CatGuard\` directory on Windows.
+
+### A-005 — Rename UX polish
+- Dialog is resizable horizontally (Entry field grows with window width).
+- After the dialog closes (OK, Cancel, ESC, or X), focus always returns to the sound-library listbox, the renamed item is re-selected, and the Rename button is re-enabled.
+- Dialog position/size persists between invocations via A-002.

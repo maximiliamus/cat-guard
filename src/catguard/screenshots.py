@@ -87,7 +87,7 @@ def is_within_time_window(settings: "Settings") -> bool:
     - If ``start > end``: midnight-spanning — True when ``now ≥ start OR now < end``
     - If ``start == end``: degenerate — treated as disabled (True), logs warning
     """
-    if not settings.screenshot_window_enabled:
+    if not settings.tracking_window_enabled:
         return True
 
     import re
@@ -100,28 +100,27 @@ def is_within_time_window(settings: "Settings") -> bool:
         h, m = int(t[:2]), int(t[3:])
         return dt_time(h, m)
 
-    start = _parse(settings.screenshot_window_start)
-    end = _parse(settings.screenshot_window_end)
+    start = _parse(settings.tracking_window_start)
+    end = _parse(settings.tracking_window_end)
 
     if start is None or end is None:
         logger.warning(
             "Invalid time window values (%r, %r) — treating as disabled.",
-            settings.screenshot_window_start,
-            settings.screenshot_window_end,
+            settings.tracking_window_start,
+            settings.tracking_window_end,
         )
         return True
 
     if start == end:
         logger.warning(
             "Time window start == end (%r) — degenerate case; treating as disabled.",
-            settings.screenshot_window_start,
+            settings.tracking_window_start,
         )
         return True
 
     now = datetime.now().time()
 
-    if start < end:
-        # Same-day window, e.g. 08:00–18:00
+    if start < end:  # Same-day window, e.g. 08:00–18:00
         return start <= now < end
     else:
         # Midnight-spanning window, e.g. 22:00–06:00

@@ -270,16 +270,16 @@ class TestIsWithinTimeWindow:
     def test_disabled_always_returns_true(self):
         from catguard.screenshots import is_within_time_window
 
-        s = _settings(screenshot_window_enabled=False)
+        s = _settings(tracking_window_enabled=False)
         assert is_within_time_window(s) is True
 
     def test_same_day_window_inside(self):
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="08:00",
-            screenshot_window_end="18:00",
+            tracking_window_enabled=True,
+            tracking_window_start="08:00",
+            tracking_window_end="18:00",
         )
         fake_now = datetime(2026, 3, 1, 12, 0, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -291,9 +291,9 @@ class TestIsWithinTimeWindow:
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="08:00",
-            screenshot_window_end="18:00",
+            tracking_window_enabled=True,
+            tracking_window_start="08:00",
+            tracking_window_end="18:00",
         )
         fake_now = datetime(2026, 3, 1, 20, 0, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -306,9 +306,9 @@ class TestIsWithinTimeWindow:
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="22:00",
-            screenshot_window_end="06:00",
+            tracking_window_enabled=True,
+            tracking_window_start="22:00",
+            tracking_window_end="06:00",
         )
         fake_now = datetime(2026, 3, 1, 23, 30, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -321,9 +321,9 @@ class TestIsWithinTimeWindow:
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="22:00",
-            screenshot_window_end="06:00",
+            tracking_window_enabled=True,
+            tracking_window_start="22:00",
+            tracking_window_end="06:00",
         )
         fake_now = datetime(2026, 3, 1, 3, 0, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -336,9 +336,9 @@ class TestIsWithinTimeWindow:
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="22:00",
-            screenshot_window_end="06:00",
+            tracking_window_enabled=True,
+            tracking_window_start="22:00",
+            tracking_window_end="06:00",
         )
         fake_now = datetime(2026, 3, 1, 14, 0, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -351,9 +351,9 @@ class TestIsWithinTimeWindow:
         from catguard.screenshots import is_within_time_window
 
         s = _settings(
-            screenshot_window_enabled=True,
-            screenshot_window_start="12:00",
-            screenshot_window_end="12:00",
+            tracking_window_enabled=True,
+            tracking_window_start="12:00",
+            tracking_window_end="12:00",
         )
         # Any time should be accepted
         fake_now = datetime(2026, 3, 1, 8, 0, 0)

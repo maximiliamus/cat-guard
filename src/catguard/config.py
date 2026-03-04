@@ -72,24 +72,6 @@ class Settings(BaseModel):
             "Empty string means use the OS default (Pictures/CatGuard)."
         ),
     )
-    screenshot_window_enabled: bool = Field(
-        default=False,
-        description=(
-            "When True, screenshots are only saved within the configured "
-            "daily time window."
-        ),
-    )
-    screenshot_window_start: str = Field(
-        default="22:00",
-        description="Start of the daily screenshot window (HH:MM, local time).",
-    )
-    screenshot_window_end: str = Field(
-        default="06:00",
-        description=(
-            "End of the daily screenshot window (HH:MM, local time). "
-            "May precede start to span midnight."
-        ),
-    )
     use_default_sound: bool = Field(
         default=True,
         description=(
@@ -102,6 +84,25 @@ class Settings(BaseModel):
         description=(
             "Absolute path to the specific library sound to always play. "
             "Empty string means random selection from sound_library_paths."
+        ),
+    )
+    tracking_window_enabled: bool = Field(
+        default=False,
+        description=(
+            "When True, the camera is active only during the window defined by "
+            "tracking_window_start and tracking_window_end. "
+            "When False, the camera runs continuously (existing behavior)."
+        ),
+    )
+    tracking_window_start: str = Field(
+        default="08:00",
+        description="Start of the daily active monitoring period (HH:MM, local 24-hour time).",
+    )
+    tracking_window_end: str = Field(
+        default="18:00",
+        description=(
+            "End of the daily active monitoring period (HH:MM, local 24-hour time). "
+            "May precede start to span midnight (e.g. '22:00' → '06:00')."
         ),
     )
 
@@ -123,31 +124,31 @@ class Settings(BaseModel):
         """Silently drop paths that no longer exist on disk."""
         return [p for p in paths if Path(p).is_file()]
 
-    @field_validator("screenshot_window_start", mode="before")
+    @field_validator("tracking_window_start", mode="before")
     @classmethod
-    def validate_window_start(cls, value: object) -> str:
-        """Accept HH:MM strings; reset invalid values to '22:00'."""
+    def validate_tracking_window_start(cls, value: object) -> str:
+        """Accept HH:MM strings; reset invalid values to '08:00'."""
         _HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
         if isinstance(value, str) and _HHMM_RE.match(value):
             return value
         logger.warning(
-            "Invalid HH:MM value for screenshot_window_start (%r) — resetting to '22:00'.",
+            "Invalid HH:MM value for tracking_window_start (%r) — resetting to '08:00'.",
             value,
         )
-        return "22:00"
+        return "08:00"
 
-    @field_validator("screenshot_window_end", mode="before")
+    @field_validator("tracking_window_end", mode="before")
     @classmethod
-    def validate_window_end(cls, value: object) -> str:
-        """Accept HH:MM strings; reset invalid values to '06:00'."""
+    def validate_tracking_window_end(cls, value: object) -> str:
+        """Accept HH:MM strings; reset invalid values to '18:00'."""
         _HHMM_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
         if isinstance(value, str) and _HHMM_RE.match(value):
             return value
         logger.warning(
-            "Invalid HH:MM value for screenshot_window_end (%r) — resetting to '06:00'.",
+            "Invalid HH:MM value for tracking_window_end (%r) — resetting to '18:00'.",
             value,
         )
-        return "06:00"
+        return "18:00"
 
 
 def load_settings() -> Settings:

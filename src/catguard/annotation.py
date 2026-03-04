@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from datetime import datetime as _dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -159,21 +160,66 @@ def _draw_labelled_box(
     x1: int, y1: int, x2: int, y2: int,
     label: str,
 ) -> None:
-    """Draw a bounding box rectangle with a confidence label on a filled rect."""
+    """Draw a bounding box rectangle with a confidence label on a filled rect.
+
+    Label placement uses a 5-candidate fallback chain to stay on-screen
+    (FR-016–FR-019, research.md R-003):
+      1. Above box (default)
+      2. Below box
+      3. Left of box
+      4. Right of box
+      5. Center of box (last resort — always used if no edge position fits)
+    """
+    h, w = frame.shape[:2]
+
     # Draw the box outline
     cv2.rectangle(frame, (x1, y1), (x2, y2), BOX_COLOR, BOX_THICKNESS)
 
-    # Two-pass label: measure → background rect → text
+    # Measure label text dimensions
     (tw, th), baseline = cv2.getTextSize(label, FONT, FONT_SCALE, FONT_THICK)
-    label_x = x1
-    label_y = max(y1 - LABEL_PAD, th + LABEL_PAD)
-    bg_x1 = label_x - LABEL_PAD
-    bg_y1 = label_y - th - LABEL_PAD
-    bg_x2 = label_x + tw + LABEL_PAD
-    bg_y2 = label_y + baseline + LABEL_PAD
+
+    def _label_fits(lx: int, ly: int) -> bool:
+        """Return True if the label background rect fits entirely within the frame."""
+        bg_x1 = lx - LABEL_PAD
+        bg_y1 = ly - th - LABEL_PAD
+        bg_x2 = lx + tw + LABEL_PAD
+        bg_y2 = ly + baseline + LABEL_PAD
+        return bg_x1 >= 0 and bg_y1 >= 0 and bg_x2 <= w and bg_y2 <= h
+
+    mid_y_label = (y1 + y2) // 2  # vertical midpoint of the box
+
+    # Ordered candidate anchor points (label_x, label_y)
+    candidates = [
+        (x1, y1 - LABEL_PAD),                          # 1. above box
+        (x1, y2 + th + LABEL_PAD),                     # 2. below box
+        (x1 - tw - 2 * LABEL_PAD, mid_y_label),        # 3. left of box
+        (x2 + LABEL_PAD, mid_y_label),                  # 4. right of box
+    ]
+
+    chosen_lx, chosen_ly = None, None
+    for lx, ly in candidates:
+        if _label_fits(lx, ly):
+            chosen_lx, chosen_ly = lx, ly
+            break
+
+    # 5. Center fallback — always drawn, even if partially off-screen (FR-019)
+    if chosen_lx is None:
+        chosen_lx = (x1 + x2) // 2 - tw // 2
+        chosen_ly = (y1 + y2) // 2
+        logger.debug(
+            "_draw_labelled_box: all edge positions off-screen for box "
+            "(%d,%d,%d,%d) — using center fallback.",
+            x1, y1, x2, y2,
+        )
+
+    # Render background rect + text at the chosen position
+    bg_x1 = chosen_lx - LABEL_PAD
+    bg_y1 = chosen_ly - th - LABEL_PAD
+    bg_x2 = chosen_lx + tw + LABEL_PAD
+    bg_y2 = chosen_ly + baseline + LABEL_PAD
     cv2.rectangle(frame, (bg_x1, bg_y1), (bg_x2, bg_y2), BOX_COLOR, -1)
     cv2.putText(
-        frame, label, (label_x, label_y),
+        frame, label, (chosen_lx, chosen_ly),
         FONT, FONT_SCALE, TEXT_COLOR, FONT_THICK, LINE_TYPE,
     )
 
@@ -216,8 +262,7 @@ def _draw_top_bar(frame: "np.ndarray", sound_label: str) -> None:
     Left side : alert sound filename (Unicode-safe via Pillow).
     Right side: current local date/time.
     """
-    from datetime import datetime as _dt
-    timestamp = _dt.now().strftime("%Y-%m-%d  %H:%M:%S")
+    timestamp = _dt.now().strftime("%x  %X")  # locale-aware (FR-020/FR-021; R-002)
 
     _h, w = frame.shape[:2]
     pad = OVERLAY_PAD
