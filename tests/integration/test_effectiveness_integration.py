@@ -75,8 +75,8 @@ def _bottom_strip_center_y(frame: np.ndarray) -> int:
 
 @pytest.fixture()
 def tmp_settings(tmp_path: Path) -> Settings:
-    """Settings pointing all screenshot output to tmp_path."""
-    return Settings(screenshots_root_folder=str(tmp_path))
+    """Settings pointing all tracking output to tmp_path."""
+    return Settings(tracking_directory=str(tmp_path))
 
 
 # ---------------------------------------------------------------------------

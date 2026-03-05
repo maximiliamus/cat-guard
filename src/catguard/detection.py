@@ -168,6 +168,13 @@ class DetectionLoop:
         pending-state sentinel (YAGNI: detection-time boxes and sound label
         are owned by EffectivenessTracker, not this loop).
         """
+        self._latest_frame: Optional["np.ndarray"] = None
+        """Latest raw BGR frame from the camera (for photo capture, etc).
+        
+        Updated on every frame iteration; used by ActionPanel to capture
+        clean photos without detection overlays.
+        """
+        self._frame_lock = threading.Lock()
         self._verification_callback: Optional[Callable] = None
         # Pause/resume state management (T002, T003, T004)
         self._is_tracking = False
@@ -297,6 +304,21 @@ class DetectionLoop:
         with self._tracking_lock:
             return self._is_tracking
 
+    def get_latest_frame(self) -> Optional["np.ndarray"]:
+        """Return a copy of the latest captured frame, or None if unavailable.
+
+        Thread-safe: Returns a copy to avoid race conditions with the
+        detection loop updating the frame.
+
+        Returns:
+            np.ndarray or None: Latest BGR frame, or None if no frame
+            has been captured yet (e.g., during startup).
+        """
+        with self._frame_lock:
+            if self._latest_frame is None:
+                return None
+            return self._latest_frame.copy()
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -364,6 +386,10 @@ class DetectionLoop:
                         except Exception:  # pragma: no cover
                             logger.exception("Error callback raised an exception.")
                     break  # Exit detection loop
+
+                # Store the latest frame for remote access (e.g., photo capture)
+                with self._frame_lock:
+                    self._latest_frame = frame.copy()
 
                 # Pull current threshold from shared settings (live updates for free)
                 conf = self._settings.confidence_threshold

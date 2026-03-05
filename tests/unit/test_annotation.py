@@ -245,7 +245,7 @@ class TestEffectivenessTrackerStateMachine:
     def _make_tracker(self, tmp_path):
         from catguard.annotation import EffectivenessTracker
         from catguard.config import Settings
-        settings = Settings(screenshots_root_folder=str(tmp_path))
+        settings = Settings(tracking_directory=str(tmp_path))
         return EffectivenessTracker(
             settings=settings,
             is_window_open=lambda: False,
@@ -309,7 +309,7 @@ class TestSaveAnnotatedAsyncErrorIsolation:
         from catguard.annotation import EffectivenessTracker
         from catguard.config import Settings
         on_error = MagicMock()
-        settings = Settings(screenshots_root_folder=str(tmp_path))
+        settings = Settings(tracking_directory=str(tmp_path))
         tracker = EffectivenessTracker(
             settings=settings,
             is_window_open=lambda: False,

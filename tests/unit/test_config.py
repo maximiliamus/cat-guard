@@ -102,39 +102,42 @@ class TestLoadSettings:
 
 
 # ---------------------------------------------------------------------------
-# T003: New screenshot-related Settings fields
+# T003: New tracking-related Settings fields
 # ---------------------------------------------------------------------------
 
-class TestScreenshotSettingsDefaults:
-    """T003 — four new Settings fields with correct defaults (TDD RED before T005)."""
+class TestTrackingSettingsDefaults:
+    """T003 — tracking_directory with correct default (TDD RED before T005)."""
 
-    def test_screenshots_root_folder_default_is_empty_string(self):
+    def test_tracking_directory_default_is_correct(self):
         s = Settings()
-        assert s.screenshots_root_folder == ""
+        # Default should be in user's Pictures directory under CatGuard/tracking
+        assert "CatGuard" in s.tracking_directory
+        assert "tracking" in s.tracking_directory
+        assert s.tracking_directory.endswith("tracking") or s.tracking_directory.endswith("tracking/")
 
 
-class TestScreenshotSettingsAssignment:
-    """T003 — new fields accept valid values and persist through save/load."""
+class TestTrackingSettingsAssignment:
+    """T003 — tracking_directory accepts valid values and persists through save/load."""
 
-    def test_screenshots_root_folder_accepts_path_string(self):
-        s = Settings(screenshots_root_folder="/some/path")
-        assert s.screenshots_root_folder == "/some/path"
+    def test_tracking_directory_accepts_path_string(self):
+        s = Settings(tracking_directory="/some/path")
+        assert s.tracking_directory == "/some/path"
 
 
-class TestScreenshotSettingsRoundTrip:
-    """T003 — new fields survive a save → load round-trip."""
+class TestTrackingSettingsRoundTrip:
+    """T003 — tracking_directory survives a save → load round-trip."""
 
-    def test_screenshot_fields_round_trip(self, tmp_path):
+    def test_tracking_directory_round_trip(self, tmp_path):
         config_file = tmp_path / "settings.json"
         original = Settings(
-            screenshots_root_folder="/tmp/cats",
+            tracking_directory="/tmp/cats",
         )
         with patch("catguard.config._config_file", return_value=config_file):
             save_settings(original)
             loaded = load_settings()
-        assert loaded.screenshots_root_folder == "/tmp/cats"
+        assert loaded.tracking_directory == "/tmp/cats"
 
-    def test_legacy_settings_without_screenshot_fields_load_with_defaults(self, tmp_path):
+    def test_legacy_settings_without_tracking_directory_load_with_defaults(self, tmp_path):
         """Existing settings.json without new fields loads without error."""
         config_file = tmp_path / "settings.json"
         legacy_data = {"camera_index": 1, "cooldown_seconds": 10.0}
@@ -142,7 +145,9 @@ class TestScreenshotSettingsRoundTrip:
         with patch("catguard.config._config_file", return_value=config_file):
             loaded = load_settings()
         assert loaded.camera_index == 1
-        assert loaded.screenshots_root_folder == ""
+        # Should load with default that includes CatGuard/tracking
+        assert "CatGuard" in loaded.tracking_directory
+        assert "tracking" in loaded.tracking_directory
 
 
 class TestSaveSettings:
@@ -173,6 +178,58 @@ class TestSaveSettings:
 # ---------------------------------------------------------------------------
 # T003: New audio playback Settings fields (use_default_sound, pinned_sound)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# T004: New photo-related Settings fields (Phase 2, T004)
+# ---------------------------------------------------------------------------
+
+class TestPhotoSettingsDefaults:
+    def test_photos_directory_default(self):
+        s = Settings()
+        # Default should be in user's Pictures directory under CatGuard/photos
+        assert "CatGuard" in s.photos_directory
+        assert "photos" in s.photos_directory
+        assert s.photos_directory.endswith("photos") or s.photos_directory.endswith("photos/")
+
+    def test_tracking_directory_default(self):
+        s = Settings()
+        # Default should be in user's Pictures directory under CatGuard/tracking
+        assert "CatGuard" in s.tracking_directory
+        assert "tracking" in s.tracking_directory
+        assert s.tracking_directory.endswith("tracking") or s.tracking_directory.endswith("tracking/")
+
+    def test_photo_image_format_default(self):
+        s = Settings()
+        assert s.photo_image_format == "jpg"
+
+    def test_photo_image_quality_default(self):
+        s = Settings()
+        assert s.photo_image_quality == 95
+
+    def test_tracking_image_quality_default(self):
+        s = Settings()
+        assert s.tracking_image_quality == 90
+
+    def test_photo_countdown_seconds_default(self):
+        s = Settings()
+        assert s.photo_countdown_seconds == 3
+
+class TestPhotoSettingsValidation:
+    def test_photo_image_quality_out_of_range(self):
+        with pytest.raises(Exception):
+            Settings(photo_image_quality=0)
+        with pytest.raises(Exception):
+            Settings(photo_image_quality=101)
+
+    def test_tracking_image_quality_out_of_range(self):
+        with pytest.raises(Exception):
+            Settings(tracking_image_quality=0)
+        with pytest.raises(Exception):
+            Settings(tracking_image_quality=101)
+
+    def test_photos_directory_rejects_dotdot(self):
+        with pytest.raises(Exception):
+            Settings(photos_directory="../badpath/photos")
 
 class TestAudioSettingsDefaults:
     """T003 — new audio fields have correct defaults."""

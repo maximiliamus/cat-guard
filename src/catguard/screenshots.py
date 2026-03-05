@@ -17,8 +17,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
-from platformdirs import user_pictures_dir
-
 try:
     import cv2  # noqa: F401 — imported here so tests can patch catguard.screenshots.cv2
 except ImportError:  # pragma: no cover
@@ -36,14 +34,15 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 def resolve_root(settings: "Settings") -> Path:
-    """Return the effective screenshots root folder as an absolute Path.
+    """Return the effective tracking root folder as an absolute Path.
 
-    If ``settings.screenshots_root_folder`` is non-empty, use that path.
-    Otherwise fall back to ``<OS Pictures dir>/CatGuard``.
+    Uses ``settings.tracking_directory``. If it's a relative path, 
+    it's resolved relative to the current working directory.
     """
-    if settings.screenshots_root_folder:
-        return Path(settings.screenshots_root_folder)
-    return Path(user_pictures_dir()) / "CatGuard"
+    path = Path(settings.tracking_directory)
+    if not path.is_absolute():
+        path = path.resolve()
+    return path
 
 
 # ---------------------------------------------------------------------------

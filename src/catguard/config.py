@@ -14,13 +14,23 @@ import re
 from pathlib import Path
 from typing import List
 
-from platformdirs import user_config_dir
+from platformdirs import user_config_dir, user_pictures_dir
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(user_config_dir("CatGuard"))
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
+
+
+def _default_tracking_directory() -> str:
+    """Return the default tracking directory path."""
+    return str(Path(user_pictures_dir()) / "CatGuard" / "tracking")
+
+
+def _default_photos_directory() -> str:
+    """Return the default photos directory path."""
+    return str(Path(user_pictures_dir()) / "CatGuard" / "photos")
 
 
 def _config_file() -> Path:
@@ -65,13 +75,6 @@ class Settings(BaseModel):
         default=False,
         description="Whether the app starts automatically on user login.",
     )
-    screenshots_root_folder: str = Field(
-        default="",
-        description=(
-            "Absolute path to the screenshots root folder. "
-            "Empty string means use the OS default (Pictures/CatGuard)."
-        ),
-    )
     use_default_sound: bool = Field(
         default=True,
         description=(
@@ -105,6 +108,51 @@ class Settings(BaseModel):
             "May precede start to span midnight (e.g. '22:00' → '06:00')."
         ),
     )
+    photos_directory: str = Field(
+        default_factory=_default_photos_directory,
+        description="Directory where captured photos are saved (date-organised into YYYY-MM-DD subfolders). Defaults to system Pictures directory.",
+    )
+    tracking_directory: str = Field(
+        default_factory=_default_tracking_directory,
+        description="Directory where tracking screenshots are saved. Defaults to system Pictures directory.",
+    )
+    photo_image_format: str = Field(
+        default="jpg",
+        description="Image format for saved photos (currently 'jpg' only; future: 'png', 'webp').",
+    )
+    photo_image_quality: int = Field(
+        default=95,
+        ge=1,
+        le=100,
+        description="JPEG quality for saved photos (1–100, where 100 is best fidelity).",
+    )
+    tracking_image_quality: int = Field(
+        default=90,
+        ge=1,
+        le=100,
+        description="JPEG quality for tracking/detection screenshots (1–100).",
+    )
+    photo_countdown_seconds: int = Field(
+        default=3,
+        gt=0,
+        description="Countdown duration (in seconds) for 'Take photo with delay' button.",
+    )
+
+    @field_validator("photos_directory")
+    @classmethod
+    def validate_photos_directory(cls, path: str) -> str:
+        """Reject paths containing '..' for security (NFR-SEC-001)."""
+        if ".." in path:
+            raise ValueError(f"photos_directory must not contain '..' (got {path!r})")
+        return path
+
+    @field_validator("tracking_directory")
+    @classmethod
+    def validate_tracking_directory(cls, path: str) -> str:
+        """Reject paths containing '..' for security (NFR-SEC-001)."""
+        if ".." in path:
+            raise ValueError(f"tracking_directory must not contain '..' (got {path!r})")
+        return path
 
     @field_validator("pinned_sound")
     @classmethod
