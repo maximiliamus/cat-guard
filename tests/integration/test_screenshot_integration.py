@@ -32,7 +32,7 @@ def _blank_frame(h: int = 480, w: int = 640) -> np.ndarray:
 class TestScreenshotIntegration:
     def test_jpeg_file_created_for_synthetic_frame(self, tmp_path):
         """A real .jpg file must appear on disk within the correct date folder."""
-        s = Settings(screenshots_root_folder=str(tmp_path))
+        s = Settings(tracking_directory=str(tmp_path))
 
         with patch("catguard.screenshots.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 3, 1, 22, 30, 0)
@@ -52,7 +52,7 @@ class TestScreenshotIntegration:
         """Saved file must be a readable JPEG."""
         import cv2
 
-        s = Settings(screenshots_root_folder=str(tmp_path))
+        s = Settings(tracking_directory=str(tmp_path))
         frame = _blank_frame()
 
         save_screenshot(frame, s, is_window_open=lambda: False, on_error=MagicMock())
@@ -64,7 +64,7 @@ class TestScreenshotIntegration:
 
     def test_two_saves_same_second_produce_unique_files(self, tmp_path):
         """Same-second collisions must yield two distinct file paths."""
-        s = Settings(screenshots_root_folder=str(tmp_path))
+        s = Settings(tracking_directory=str(tmp_path))
 
         fixed_ts = datetime(2026, 3, 1, 22, 30, 0)
         with patch("catguard.screenshots.datetime") as mock_dt:
@@ -82,7 +82,7 @@ class TestScreenshotIntegration:
 
     def test_no_file_when_window_open(self, tmp_path):
         """FR-012: no file when main window is open (integration guard)."""
-        s = Settings(screenshots_root_folder=str(tmp_path))
+        s = Settings(tracking_directory=str(tmp_path))
         save_screenshot(
             _blank_frame(), s, is_window_open=lambda: True, on_error=MagicMock()
         )
@@ -93,7 +93,7 @@ class TestScreenshotIntegration:
         import cv2
         from unittest.mock import MagicMock, patch
 
-        s = Settings(screenshots_root_folder=str(tmp_path))
+        s = Settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         with patch("pathlib.Path.write_bytes", side_effect=PermissionError("read-only")):

@@ -15,7 +15,7 @@
   "cooldown_seconds": 15.0,
   "sound_library_paths": [],
   "autostart": false,
-  "screenshots_root_folder": "",
+  "tracking_directory": "/home/user/Pictures/CatGuard/tracking",
   "use_default_sound": true,
   "pinned_sound": "",
   "tracking_window_enabled": false,
@@ -41,7 +41,7 @@
 | `cooldown_seconds` | `number` | `15.0` | Minimum seconds between alerts |
 | `sound_library_paths` | `array[string]` | `[]` | Absolute paths to MP3/WAV files. File rename updates entries in-place. |
 | `autostart` | `boolean` | `false` | Start with OS login |
-| `screenshots_root_folder` | `string` | `""` | Empty = OS default Pictures/CatGuard |
+| `tracking_directory` | `string` | System Pictures dir + `/CatGuard/tracking` | Directory for effectiveness tracking screenshots (replaces old `screenshots_root_folder`). Defaults to system's Pictures directory. |
 | `use_default_sound` | `boolean` | `true` | Always play built-in default sound |
 | `pinned_sound` | `string` | `""` | Path to always-play sound; empty = random. Updated automatically after file rename. |
 

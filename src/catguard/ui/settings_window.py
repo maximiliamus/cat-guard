@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
 
-from catguard.config import Settings
+from catguard.config import Settings, _default_tracking_directory, _default_photos_directory
 from catguard.ui.geometry import load_win_geometry, save_win_geometry
 from catguard.detection import Camera, list_cameras
 
@@ -33,8 +33,10 @@ class SettingsFormModel:
     cooldown_seconds: float = 15.0
     sound_library_paths: List[str] = field(default_factory=list)
     autostart: bool = False
-    # Screenshot fields (T013 / T023)
-    screenshots_root_folder: str = ""
+    # Tracking fields (T013 / T023 / 008)
+    tracking_directory: str = field(default_factory=_default_tracking_directory)
+    photos_directory: str = field(default_factory=_default_photos_directory)
+    photo_countdown_seconds: int = 3
     # Audio playback fields (T004)
     use_default_sound: bool = True
     pinned_sound: str = ""
@@ -56,7 +58,9 @@ class SettingsFormModel:
             cooldown_seconds=s.cooldown_seconds,
             sound_library_paths=list(s.sound_library_paths),
             autostart=s.autostart,
-            screenshots_root_folder=s.screenshots_root_folder,
+            tracking_directory=s.tracking_directory,
+            photos_directory=s.photos_directory,
+            photo_countdown_seconds=s.photo_countdown_seconds,
             use_default_sound=s.use_default_sound,
             pinned_sound=s.pinned_sound,
             tracking_window_enabled=s.tracking_window_enabled,
@@ -76,7 +80,9 @@ class SettingsFormModel:
             cooldown_seconds=self.cooldown_seconds,
             sound_library_paths=list(self.sound_library_paths),
             autostart=self.autostart,
-            screenshots_root_folder=self.screenshots_root_folder,
+            tracking_directory=self.tracking_directory,
+            photos_directory=self.photos_directory,
+            photo_countdown_seconds=self.photo_countdown_seconds,
             use_default_sound=self.use_default_sound,
             pinned_sound=self.pinned_sound,
             tracking_window_enabled=self.tracking_window_enabled,
@@ -171,6 +177,9 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     win.title("CatGuard — Settings")
     win.resizable(False, False)
     win.grab_set()  # modal
+
+    # Set minimum size to ensure all controls fit
+    win.minsize(550, 700)
 
     # Restore saved position, or centre on root
     win.update_idletasks()
@@ -605,14 +614,14 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     auto_var = tk.BooleanVar(value=model.autostart)
     tk.Checkbutton(win, text="Start CatGuard at login", variable=auto_var).grid(row=9, column=1, sticky="w", **pad)
 
-    # ---- Screenshots section (T014) --------------------------------------
-    tk.Label(win, text="Screenshots:", font=(None, 9, "bold")).grid(
+    # ---- Screenshots section (T014 / 008) -----
+    tk.Label(win, text="Tracking Directory:", font=(None, 9, "bold")).grid(
         row=10, column=0, sticky="nw", **pad
     )
 
-    # Root folder row
-    tk.Label(win, text="Root folder:").grid(row=11, column=0, sticky="w", **pad)
-    folder_var = tk.StringVar(value=model.screenshots_root_folder)
+    # Tracking directory row
+    tk.Label(win, text="Directory:").grid(row=11, column=0, sticky="w", **pad)
+    folder_var = tk.StringVar(value=model.tracking_directory)
     ss_folder_frame = tk.Frame(win)
     ss_folder_frame.grid(row=11, column=1, sticky="w", **pad)
     tk.Entry(ss_folder_frame, textvariable=folder_var, width=28, state="readonly").pack(side="left")
@@ -620,46 +629,57 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     def _browse_folder():
         chosen = filedialog.askdirectory(
             parent=win,
-            title="Select screenshots root folder",
-            initialdir=model.screenshots_root_folder or None,
+            title="Select tracking directory",
+            initialdir=model.tracking_directory,
         )
         if chosen:
             folder_var.set(chosen)
 
     tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="left", padx=(4, 0))
 
-    # Resolve and display the effective (default) path when field is empty
-    try:
-        from catguard.screenshots import resolve_root
-        from catguard.config import Settings as _S
-        _tmp = _S(screenshots_root_folder="")
-        _default_path = str(resolve_root(_tmp))
-    except Exception:
-        _default_path = "Pictures/CatGuard"
+    # ---- Photos Directory section ----
+    tk.Label(win, text="Photos Directory:", font=(None, 9, "bold")).grid(
+        row=12, column=0, sticky="nw", **pad
+    )
 
-    tk.Label(
-        win,
-        text=f"Default: {_default_path}",
-        fg="gray",
-        font=(None, 8),
-    ).grid(row=12, column=1, sticky="w", **pad)
+    tk.Label(win, text="Directory:").grid(row=13, column=0, sticky="w", **pad)
+    photos_folder_var = tk.StringVar(value=model.photos_directory)
+    photos_folder_frame = tk.Frame(win)
+    photos_folder_frame.grid(row=13, column=1, sticky="w", **pad)
+    tk.Entry(photos_folder_frame, textvariable=photos_folder_var, width=28, state="readonly").pack(side="left")
+
+    def _browse_photos_folder():
+        chosen = filedialog.askdirectory(
+            parent=win,
+            title="Select photos directory",
+            initialdir=model.photos_directory,
+        )
+        if chosen:
+            photos_folder_var.set(chosen)
+
+    tk.Button(photos_folder_frame, text="Browse\u2026", command=_browse_photos_folder).pack(side="left", padx=(4, 0))
+
+    # ---- Photo Countdown Delay section ----
+    tk.Label(win, text="Countdown (seconds):").grid(row=14, column=0, sticky="w", **pad)
+    photo_countdown_var = tk.IntVar(value=model.photo_countdown_seconds)
+    tk.Spinbox(win, from_=1, to=30, increment=1, textvariable=photo_countdown_var, width=8).grid(row=14, column=1, sticky="w", **pad)
 
     # ---- Active Monitoring Window section (T008 / 007-misc-improvements) ----
     tk.Label(win, text="Active Monitoring\nWindow:", font=(None, 9, "bold")).grid(
-        row=15, column=0, sticky="nw", **pad
+        row=16, column=0, sticky="nw", **pad
     )
     track_win_enabled_var = tk.BooleanVar(value=model.tracking_window_enabled)
     tk.Checkbutton(
         win,
         text="Only monitor within a daily time window",
         variable=track_win_enabled_var,
-    ).grid(row=15, column=1, sticky="w", **pad)
+    ).grid(row=16, column=1, sticky="w", **pad)
 
     track_win_start_var = tk.StringVar(value=model.tracking_window_start)
     track_win_end_var = tk.StringVar(value=model.tracking_window_end)
 
     tw_track_frame = tk.Frame(win)
-    tw_track_frame.grid(row=16, column=1, sticky="w", **pad)
+    tw_track_frame.grid(row=17, column=1, sticky="w", **pad)
     tk.Label(tw_track_frame, text="From:").pack(side="left")
     track_start_spin = tk.Spinbox(
         tw_track_frame,
@@ -723,7 +743,9 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.sound_library_paths = list(path_listbox.get(0, tk.END))
         new_autostart = auto_var.get()
         model.autostart = new_autostart
-        model.screenshots_root_folder = folder_var.get()
+        model.tracking_directory = folder_var.get()
+        model.photos_directory = photos_folder_var.get()
+        model.photo_countdown_seconds = photo_countdown_var.get()
         # T016: persist audio playback settings
         model.use_default_sound = use_default_var.get()
         # T021: persist pinned_sound ("All" → empty string)
@@ -747,7 +769,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         _on_close()
 
     btn_row = tk.Frame(win)
-    btn_row.grid(row=17, column=0, columnspan=2, pady=8)
+    btn_row.grid(row=18, column=0, columnspan=2, pady=8)
     tk.Button(btn_row, text="Save", command=_save, width=10).pack(side="left", padx=4)
     tk.Button(btn_row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=4)
 

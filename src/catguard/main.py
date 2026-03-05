@@ -197,6 +197,25 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 6. Shutdown handler (SIGINT / SIGTERM)
     # ------------------------------------------------------------------
+    def get_clean_frame():
+        """T011: Retrieve the latest raw frame without detection overlays.
+        
+        Used by ActionPanel to capture clean photos for saving.
+        Returns None if no frame is available yet.
+        """
+        return detection_loop.get_latest_frame()
+    
+    def minimize_to_tray():
+        """Close the main window and restore the tray icon."""
+        root.withdraw()
+        root._main_window_visible = False
+        logger.info("Main window minimized to tray.")
+    
+    # Attach these functions to root so they can be called from MainWindow
+    root.get_clean_frame = get_clean_frame
+    root.minimize_to_tray = minimize_to_tray
+    root.settings = settings
+    
     def on_shutdown(*_args) -> None:
         logger.info("Shutting down CatGuard…")
         time_window_monitor.stop()

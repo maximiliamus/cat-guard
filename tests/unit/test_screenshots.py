@@ -36,27 +36,30 @@ def _settings(**kwargs) -> Settings:
 # ---------------------------------------------------------------------------
 
 class TestResolveRoot:
-    def test_empty_root_folder_returns_pictures_catguard(self):
+    def test_default_tracking_directory_used(self):
         from catguard.screenshots import resolve_root
 
-        s = _settings(screenshots_root_folder="")
-        with patch("catguard.screenshots.user_pictures_dir", return_value="/home/user/Pictures"):
-            result = resolve_root(s)
-        assert result == Path("/home/user/Pictures") / "CatGuard"
-
-    def test_configured_path_takes_precedence(self):
-        from catguard.screenshots import resolve_root
-
-        s = _settings(screenshots_root_folder="/custom/root")
+        s = _settings(tracking_directory="images/CatGuard/tracking")
         result = resolve_root(s)
-        assert result == Path("/custom/root")
+        assert result == Path("images/CatGuard/tracking").resolve()
 
-    def test_configured_path_returns_path_object(self):
+    def test_absolute_path_returned_as_is(self):
         from catguard.screenshots import resolve_root
 
-        s = _settings(screenshots_root_folder="/some/dir")
+        s = _settings(tracking_directory="/custom/root")
+        result = resolve_root(s)
+        # On Windows, resolve() adds the drive letter; on Unix it stays as is
+        assert isinstance(result, Path)
+        assert result.is_absolute()
+        assert str(result).endswith("custom/root") or str(result).endswith("custom\\root")
+
+    def test_relative_path_resolved(self):
+        from catguard.screenshots import resolve_root
+
+        s = _settings(tracking_directory="images/CatGuard/tracking")
         result = resolve_root(s)
         assert isinstance(result, Path)
+        assert result.is_absolute()
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +128,7 @@ class TestSaveScreenshotHappyPath:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         save_screenshot(frame, s, is_window_open=lambda: False, on_error=on_error)
@@ -138,7 +141,7 @@ class TestSaveScreenshotHappyPath:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
 
         with patch("catguard.screenshots.datetime") as mock_dt:
             mock_dt.now.return_value = datetime(2026, 3, 1, 14, 0, 0)
@@ -154,7 +157,7 @@ class TestSaveScreenshotHappyPath:
         import cv2
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
 
         with patch("catguard.screenshots.cv2") as mock_cv2:
             mock_cv2.imencode.return_value = (True, MagicMock(tobytes=lambda: b"fake"))
@@ -174,7 +177,7 @@ class TestSaveScreenshotGuards:
         """FR-011: cooldown-suppressed events (frame_bgr=None) must not save."""
         from catguard.screenshots import save_screenshot
 
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         save_screenshot(None, s, is_window_open=lambda: False, on_error=on_error)
@@ -187,7 +190,7 @@ class TestSaveScreenshotGuards:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         save_screenshot(frame, s, is_window_open=lambda: True, on_error=on_error)
@@ -200,7 +203,7 @@ class TestSaveScreenshotGuards:
         from catguard.screenshots import save_screenshot
 
         root = tmp_path / "nested" / "deep" / "root"
-        s = _settings(screenshots_root_folder=str(root))
+        s = _settings(tracking_directory=str(root))
 
         save_screenshot(
             _blank_frame(), s, is_window_open=lambda: False, on_error=MagicMock()
@@ -218,7 +221,7 @@ class TestSaveScreenshotErrors:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         with patch("catguard.screenshots.cv2") as mock_cv2:
@@ -233,7 +236,7 @@ class TestSaveScreenshotErrors:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
         on_error = MagicMock()
 
         with patch("catguard.screenshots.cv2") as mock_cv2:
@@ -251,7 +254,7 @@ class TestSaveScreenshotErrors:
         from catguard.screenshots import save_screenshot
 
         frame = _blank_frame()
-        s = _settings(screenshots_root_folder=str(tmp_path))
+        s = _settings(tracking_directory=str(tmp_path))
 
         with patch("catguard.screenshots.cv2") as mock_cv2:
             mock_cv2.IMWRITE_JPEG_QUALITY = 95

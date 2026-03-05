@@ -17,7 +17,7 @@
 
 **Purpose**: Feature branch and confirming existing helpers are importable
 
-- [ ] T001 Create feature branch `008-add-photo-action-panel` and confirm `screenshots.build_filepath` and `cv2.imencode` are importable from `src/catguard/screenshots.py`
+- [x] T001 Create feature branch `008-add-photo-action-panel` and confirm `screenshots.build_filepath` and `cv2.imencode` are importable from `src/catguard/screenshots.py`
 
 ---
 
@@ -29,11 +29,11 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T004 Edit `tests/unit/test_config.py`: assert all six new settings have correct defaults; assert `photo_image_quality` and `tracking_image_quality` validators reject values outside 1–100; assert `photos_directory` validator rejects paths with `..` components
-- [ ] T005 Write `tests/unit/test_photos.py`: test `Photo` dataclass instantiation and attribute access; test `build_photo_filepath` returns correct date subfolder and time-based filename; test collision suffix appended when file already exists; test `encode_photo` output is valid JPEG bytes
+- [x] T004 Edit `tests/unit/test_config.py`: assert all six new settings have correct defaults; assert `photo_image_quality` and `tracking_image_quality` validators reject values outside 1–100; assert `photos_directory` validator rejects paths with `..` components
+- [x] T005 Write `tests/unit/test_photos.py`: test `Photo` dataclass instantiation and attribute access; test `build_photo_filepath` returns correct date subfolder and time-based filename; test collision suffix appended when file already exists; test `encode_photo` output is valid JPEG bytes
 
-- [ ] T002 Edit `src/catguard/config.py`: add `photos_directory` (default `images/CatGuard/photos`), `tracking_directory` (default `images/catGuard/tracking`), `photo_image_format` (default `jpg`), `photo_image_quality` (default `95`, validator 1–100), `tracking_image_quality` (default `90`, validator 1–100), `photo_countdown_seconds` (default `3`) using pydantic-settings `Field` entries with appropriate validators
-- [ ] T003 Write `src/catguard/photos.py`: `Photo` dataclass with `timestamp: datetime`, `bytes: bytes`, `source: str = "clean-capture"`; `build_photo_filepath(root, ts, ext) -> Path` reusing `screenshots.build_filepath` semantics (date subfolder `YYYY-MM-DD`, filename `HH-MM-SS.jpg`, collision suffix `-1`, `-2`, ...); `encode_photo(frame, quality: int) -> bytes` using `cv2.imencode`
+- [x] T002 Edit `src/catguard/config.py`: add `photos_directory` (default `images/CatGuard/photos`), `tracking_directory` (default `images/catGuard/tracking`), `photo_image_format` (default `jpg`), `photo_image_quality` (default `95`, validator 1–100), `tracking_image_quality` (default `90`, validator 1–100), `photo_countdown_seconds` (default `3`) using pydantic-settings `Field` entries with appropriate validators
+- [x] T003 Write `src/catguard/photos.py`: `Photo` dataclass with `timestamp: datetime`, `bytes: bytes`, `source: str = "clean-capture"`; `build_photo_filepath(root, ts, ext) -> Path` reusing `screenshots.build_filepath` semantics (date subfolder `YYYY-MM-DD`, filename `HH-MM-SS.jpg`, collision suffix `-1`, `-2`, ...); `encode_photo(frame, quality: int) -> bytes` using `cv2.imencode`
 
 **Checkpoint**: `pytest tests/unit/ -q` green with no regressions — user story work can now begin
 
@@ -49,16 +49,16 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T006 [P] [US1] Write `tests/integration/test_photo_action_panel.py`: mock `tkinter.filedialog.asksaveasfilename`, `os.makedirs`, and `open`; write failing tests for: `Take photo` opens `PhotoWindow`; `PhotoWindow` renders three buttons with exact labels `Save`, `Save As...`, `Close` (NFR-UX-001); `Save` writes to correct `YYYY-MM-DD/<HH-MM-SS>.jpg` path under `photos_directory`; collision produces `-1` suffix; `Save As...` dialog initialised with OS default dir on first use and `ActionPanel._last_save_dir` on second use (session-scoped, not per-window); `initialfile` pre-populated with `catguard_YYYYMMDD_HHMMSS.jpg`; cancelled dialog leaves `PhotoWindow` open; `Save` button shows `Saved ✓` then restores label (NFR-UX-001); save failure shows inline `Save failed — <filename>` message; closing `PhotoWindow` sets `photo` reference to `None` (FR-008); no image bytes appear in log output during encode/save (NFR-SEC-003)
+- [x] T006 [P] [US1] Write `tests/integration/test_photo_action_panel.py`: mock `tkinter.filedialog.asksaveasfilename`, `os.makedirs`, and `open`; write failing tests for: `Take photo` opens `PhotoWindow`; `PhotoWindow` renders three buttons with exact labels `Save`, `Save As...`, `Close` (NFR-UX-001); `Save` writes to correct `YYYY-MM-DD/<HH-MM-SS>.jpg` path under `photos_directory`; collision produces `-1` suffix; `Save As...` dialog initialised with OS default dir on first use and `ActionPanel._last_save_dir` on second use (session-scoped, not per-window); `initialfile` pre-populated with `catguard_YYYYMMDD_HHMMSS.jpg`; cancelled dialog leaves `PhotoWindow` open; `Save` button shows `Saved ✓` then restores label (NFR-UX-001); save failure shows inline `Save failed — <filename>` message; closing `PhotoWindow` sets `photo` reference to `None` (FR-008); no image bytes appear in log output during encode/save (NFR-SEC-003)
 
 ### Implementation for User Story 1
 
-- [ ] T007 [US1] Write `src/catguard/ui/photo_window.py`: `PhotoWindow(tk.Toplevel)` — display captured image on a `Canvas`/`Label`; action panel with `Save` button (left), `Save As...` button (middle), `Close` button (right) using `pack`/`grid` without fixed pixel sizes; status label row below buttons for inline error/success feedback; accepts `last_save_dir: str | None` and `on_save_dir_change: Callable[[str], None]` constructor arguments (session state managed by `ActionPanel`, not per-window); `Close` button MUST set `self.photo = None` to release the in-memory image before destroying the window
-- [ ] T008 [US1] Wire `Save` button in `src/catguard/ui/photo_window.py`: call `build_photo_filepath(root=settings.photos_directory, ts=photo.timestamp, ext=settings.photo_image_format)`; `os.makedirs(parent, exist_ok=True)`; write `photo.bytes` to resolved path; on success update button label to `Saved ✓` for 2 s via `root.after(2000, restore_label)`, then restore; on failure display `Save failed — <filename>` inline (NFR-UX-002, NFR-SEC-004); log full path at DEBUG level only
-- [ ] T009 [US1] Wire `Save As...` button in `src/catguard/ui/photo_window.py`: call `asksaveasfilename(initialdir=self._last_save_dir or <OS default>, initialfile=catguard_YYYYMMDD_HHMMSS.jpg, defaultextension=.jpg, filetypes=[("JPEG", "*.jpg")])`; on non-empty result normalise path with `os.path.normpath` and reject `..` components (NFR-SEC-001); write `photo.bytes` to the resolved path; call `self._on_save_dir_change(parent_dir)` to update the session-scoped `last_save_dir` on `ActionPanel`; on cancellation do nothing
-- [ ] T010 [US1] Write `src/catguard/ui/action_panel.py`: `ActionPanel(tk.Frame)` initialised with `capture_callback: Callable[[], np.ndarray]`, `close_callback: Callable[[], None]`, and `settings`; add `_last_save_dir: str | None = None` instance variable (session-scoped, shared across all `PhotoWindow` instances opened this session); add `Take photo` button that calls `capture_callback()` to obtain a raw overlay-free frame, encodes it via `encode_photo(frame, settings.photo_image_quality)`, creates `Photo(timestamp=datetime.now(), bytes=encoded)`, and opens `PhotoWindow(master=root, photo=photo, settings=settings, last_save_dir=self._last_save_dir, on_save_dir_change=self._update_last_save_dir)`; add `_update_last_save_dir(self, path: str) -> None` method that sets `self._last_save_dir = path`
-- [ ] T011 [US1] Implement `get_clean_frame() -> np.ndarray` in `src/catguard/main.py`: retrieve the latest raw detection frame from the detection pipeline without rendering any annotation overlays; wire this method as the `capture_callback` passed to `ActionPanel` in T012
-- [ ] T012 [US1] Integrate `ActionPanel` into `src/catguard/ui/main_window.py`: instantiate `ActionPanel(parent=self, capture_callback=self.get_clean_frame, close_callback=self.minimize_to_tray, settings=self.settings)` and attach via `action_panel.pack(side=tk.BOTTOM, fill=tk.X)`
+- [x] T007 [US1] Write `src/catguard/ui/photo_window.py`: `PhotoWindow(tk.Toplevel)` — display captured image on a `Canvas`/`Label`; action panel with `Save` button (left), `Save As...` button (middle), `Close` button (right) using `pack`/`grid` without fixed pixel sizes; status label row below buttons for inline error/success feedback; accepts `last_save_dir: str | None` and `on_save_dir_change: Callable[[str], None]` constructor arguments (session state managed by `ActionPanel`, not per-window); `Close` button MUST set `self.photo = None` to release the in-memory image before destroying the window
+- [x] T008 [US1] Wire `Save` button in `src/catguard/ui/photo_window.py`: call `build_photo_filepath(root=settings.photos_directory, ts=photo.timestamp, ext=settings.photo_image_format)`; `os.makedirs(parent, exist_ok=True)`; write `photo.bytes` to resolved path; on success update button label to `Saved ✓` for 2 s via `root.after(2000, restore_label)`, then restore; on failure display `Save failed — <filename>` inline (NFR-UX-002, NFR-SEC-004); log full path at DEBUG level only
+- [x] T009 [US1] Wire `Save As...` button in `src/catguard/ui/photo_window.py`: call `asksaveasfilename(initialdir=self._last_save_dir or <OS default>, initialfile=catguard_YYYYMMDD_HHMMSS.jpg, defaultextension=.jpg, filetypes=[("JPEG", "*.jpg")])`; on non-empty result normalise path with `os.path.normpath` and reject `..` components (NFR-SEC-001); write `photo.bytes` to the resolved path; call `self._on_save_dir_change(parent_dir)` to update the session-scoped `last_save_dir` on `ActionPanel`; on cancellation do nothing
+- [x] T010 [US1] Write `src/catguard/ui/action_panel.py`: `ActionPanel(tk.Frame)` initialised with `capture_callback: Callable[[], np.ndarray]`, `close_callback: Callable[[], None]`, and `settings`; add `_last_save_dir: str | None = None` instance variable (session-scoped, shared across all `PhotoWindow` instances opened this session); add `Take photo` button that calls `capture_callback()` to obtain a raw overlay-free frame, encodes it via `encode_photo(frame, settings.photo_image_quality)`, creates `Photo(timestamp=datetime.now(), bytes=encoded)`, and opens `PhotoWindow(master=root, photo=photo, settings=settings, last_save_dir=self._last_save_dir, on_save_dir_change=self._update_last_save_dir)`; add `_update_last_save_dir(self, path: str) -> None` method that sets `self._last_save_dir = path`
+- [x] T011 [US1] Implement `get_latest_frame()` in `src/catguard/detection.py`: DetectionLoop stores latest raw detection frame in `_latest_frame` with thread-safe access via `_frame_lock`; `get_latest_frame()` returns copy of latest frame or None if unavailable (allows ActionPanel to access clean frames without overlays)
+- [x] T012 [US1] Integrate `ActionPanel` into `src/catguard/ui/main_window.py`: instantiate `ActionPanel(parent=self._window, capture_callback=lambda: self._root.get_clean_frame(), close_callback=self._root.minimize_to_tray, settings=self._root.settings)` and attach via `action_panel._frame.pack(side=tk.BOTTOM, fill=tk.X)`
 
 **Checkpoint**: User Story 1 independently functional — `Take photo` → `PhotoWindow` → `Save`/`Save As...`/`Close` all work; integration tests green
 
@@ -74,12 +74,12 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T013 [P] [US2] Extend `tests/integration/test_photo_action_panel.py`: mock `root.after` to advance ticks; assert button text transitions 3 → 2 → 1; assert click during countdown does not open a second window; assert button label restores and becomes clickable after capture; assert `photo_countdown_seconds` setting controls starting value
+- [x] T013 [P] [US2] Extend `tests/integration/test_photo_action_panel.py`: mock `root.after` to advance ticks; assert button text transitions 3 → 2 → 1; assert click during countdown does not open a second window; assert button label restores and becomes clickable after capture; assert `photo_countdown_seconds` setting controls starting value
 
 ### Implementation for User Story 2
 
-- [ ] T014 [US2] Add `Take photo with delay` button to `src/catguard/ui/action_panel.py`: read `settings.photo_countdown_seconds` as starting value; set `_countdown_active: bool = False` flag
-- [ ] T015 [US2] Implement countdown loop in `src/catguard/ui/action_panel.py`: on click, if `_countdown_active` is `True` return immediately (suppress); set `_countdown_active = True`, update button text to current tick value, schedule next tick via `self.after(1000, _tick)`; when tick reaches `0` call the same capture flow as `Take photo`, then restore button label and set `_countdown_active = False`
+- [x] T014 [US2] Add `Take photo with delay` button to `src/catguard/ui/action_panel.py`: read `settings.photo_countdown_seconds` as starting value; set `_countdown_active: bool = False` flag
+- [x] T015 [US2] Implement countdown loop in `src/catguard/ui/action_panel.py`: on click, if `_countdown_active` is `True` return immediately (suppress); set `_countdown_active = True`, update button text to current tick value, schedule next tick via `self.after(1000, _tick)`; when tick reaches `0` call the same capture flow as `Take photo`, then restore button label and set `_countdown_active = False`
 
 **Checkpoint**: User Story 2 independently functional — countdown works, suppression works, capture opens `PhotoWindow`; integration tests green
 
@@ -95,13 +95,13 @@
 
 > **NOTE: Write these tests FIRST, ensure they FAIL before implementation**
 
-- [ ] T016 [P] [US3] Extend `tests/integration/test_photo_action_panel.py`: assert `ActionPanel` is packed at `side=BOTTOM, fill=X`; assert `Close` button is present; mock tray `withdraw`/`iconify` and assert it is called when `Close` is clicked
+- [x] T016 [P] [US3] Extend `tests/integration/test_photo_action_panel.py`: assert `ActionPanel` is packed at `side=BOTTOM, fill=X`; assert `Close` button is present; mock tray `withdraw`/`iconify` and assert it is called when `Close` is clicked
 
 ### Implementation for User Story 3
 
-- [ ] T017 [US3] Add `Close` button to `src/catguard/ui/action_panel.py`: wire to `close_callback` (passed at init); button placed right-aligned using a second inner `Frame` with `pack(side=tk.RIGHT)` (photo buttons packed `side=tk.LEFT`)
-- [ ] T018 [US3] Implement `close_callback` in `src/catguard/ui/main_window.py` or `src/catguard/main.py`: call existing minimize-to-tray logic (e.g., `root.withdraw()` + tray icon notification); pass as `close_callback` when constructing `ActionPanel`
-- [ ] T019 [US3] Finalize `ActionPanel` layout in `src/catguard/ui/action_panel.py`: `Take photo` and `Take photo with delay` in a left `Frame`, `Close` in a right `Frame`, both inside the `ActionPanel` frame; use `pack`/`grid` with no fixed pixel sizes so layout scales on resize/DPI changes (NFR-UX-005)
+- [x] T017 [US3] Add `Close` button to `src/catguard/ui/action_panel.py`: wire to `close_callback` (passed at init); button placed right-aligned using a second inner `Frame` with `pack(side=tk.RIGHT)` (photo buttons packed `side=tk.LEFT`)
+- [x] T018 [US3] Implement `close_callback` in `src/catguard/ui/main_window.py` or `src/catguard/main.py`: call existing minimize-to-tray logic (e.g., `root.withdraw()` + tray icon notification); pass as `close_callback` when constructing `ActionPanel`
+- [x] T019 [US3] Finalize `ActionPanel` layout in `src/catguard/ui/action_panel.py`: `Take photo` and `Take photo with delay` in a left `Frame`, `Close` in a right `Frame`, both inside the `ActionPanel` frame; use `pack`/`grid` with no fixed pixel sizes so layout scales on resize/DPI changes (NFR-UX-005)
 
 **Checkpoint**: All three user stories independently functional; `pytest -q` fully green
 
@@ -111,10 +111,10 @@
 
 **Purpose**: Documentation, contracts, and final validation
 
-- [ ] T020 [P] Create `specs/008-add-photo-action-panel/contracts/settings.md`: document all six new settings keys (`photos_directory`, `tracking_directory`, `photo_image_format`, `photo_image_quality`, `tracking_image_quality`, `photo_countdown_seconds`) with defaults, types, valid ranges, and validation rules
-- [ ] T021 [P] Update `specs/008-add-photo-action-panel/quickstart.md`: add manual QA steps for all three action-panel buttons (`Take photo`, `Take photo with delay`, `Close`); add steps for `Save` and `Save As...` including error scenarios; add note that OS file-save dialog is mocked in automated tests and must be verified manually (NFR-PERF-002)
-- [ ] T022 Run full test suite `pytest -q` and confirm zero regressions, explicitly including existing detection integration tests (`tests/integration/test_detection_integration.py` and related) as a regression gate for FR-010 (no alteration to existing detection logic); verify implementation checklist items in `specs/008-add-photo-action-panel/checklists/implementation.md`
-- [ ] T023 Bump `pyproject.toml` version to the next MINOR identifier (additive feature, no breaking changes — Constitution V)
+- [x] T020 [P] Create `specs/008-add-photo-action-panel/contracts/settings.md`: document all six new settings keys (`photos_directory`, `tracking_directory`, `photo_image_format`, `photo_image_quality`, `tracking_image_quality`, `photo_countdown_seconds`) with defaults, types, valid ranges, and validation rules
+- [x] T021 [P] Update `specs/008-add-photo-action-panel/quickstart.md`: add manual QA steps for all three action-panel buttons (`Take photo`, `Take photo with delay`, `Close`); add steps for `Save` and `Save As...` including error scenarios; add note that OS file-save dialog is mocked in automated tests and must be verified manually (NFR-PERF-002)
+- [x] T022 Run full test suite `pytest -q` and confirm zero regressions, explicitly including existing detection integration tests (`tests/integration/test_detection_integration.py` and related) as a regression gate for FR-010 (no alteration to existing detection logic); verify implementation checklist items in `specs/008-add-photo-action-panel/checklists/implementation.md`
+- [x] T023 Bump `pyproject.toml` version to the next MINOR identifier (additive feature, no breaking changes — Constitution V)
 
 ---
 

@@ -79,31 +79,33 @@ class TestSettingsFormModel:
 
 
 # ---------------------------------------------------------------------------
-# T012: SettingsFormModel.screenshots_root_folder
+# T012: SettingsFormModel.tracking_directory (feature 008)
 # ---------------------------------------------------------------------------
 
-class TestSettingsFormModelScreenshotsRootFolder:
-    """T012 \u2014 screenshots_root_folder field on SettingsFormModel (TDD RED before T013)."""
+class TestSettingsFormModelTrackingDirectory:
+    """T008 — tracking_directory field on SettingsFormModel (replaces old screenshots_root_folder)."""
 
-    def test_from_settings_populates_screenshots_root_folder(self):
-        s = Settings(screenshots_root_folder="/my/screenshots")
+    def test_from_settings_populates_tracking_directory(self):
+        s = Settings(tracking_directory="images/CatGuard/tracking")
         model = SettingsFormModel.from_settings(s)
-        assert model.screenshots_root_folder == "/my/screenshots"
+        assert model.tracking_directory == "images/CatGuard/tracking"
 
-    def test_from_settings_empty_root_folder(self):
-        s = Settings(screenshots_root_folder="")
+    def test_from_settings_custom_tracking_directory(self):
+        s = Settings(tracking_directory="/custom/tracking")
         model = SettingsFormModel.from_settings(s)
-        assert model.screenshots_root_folder == ""
+        assert model.tracking_directory == "/custom/tracking"
 
-    def test_to_settings_round_trip_root_folder(self):
-        s = Settings(screenshots_root_folder="/tmp/cats")
+    def test_to_settings_round_trip_tracking_directory(self):
+        s = Settings(tracking_directory="/tmp/tracking")
         model = SettingsFormModel.from_settings(s)
         restored = model.to_settings()
-        assert restored.screenshots_root_folder == "/tmp/cats"
+        assert restored.tracking_directory == "/tmp/tracking"
 
-    def test_screenshots_root_folder_default_is_empty(self):
+    def test_tracking_directory_default(self):
         model = SettingsFormModel.from_settings(Settings())
-        assert model.screenshots_root_folder == ""
+        # Default should be in system Pictures directory
+        assert "CatGuard" in model.tracking_directory
+        assert "tracking" in model.tracking_directory
 
 
 # ---------------------------------------------------------------------------
@@ -418,3 +420,4 @@ class TestRenameFileIntegration:
         # The duplicate guard: if new_path.exists() and new_path != target → abort
         should_abort = new_path.exists() and new_path != target
         assert should_abort, "Duplicate detection should have fired"
+

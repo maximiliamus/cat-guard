@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from catguard.ui.action_panel import ActionPanel
+from catguard.ui.constants import ACTION_PANEL_HEIGHT
 from catguard.ui.geometry import load_win_geometry, save_win_geometry
 
 if TYPE_CHECKING:
@@ -41,8 +43,20 @@ class MainWindow:
         self._window.resizable(False, False)
         self._window.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        self._canvas: tk_mod.Canvas = tk_mod.Canvas(self._window, bg="black", highlightthickness=0)
-        self._canvas.pack(fill=tk_mod.BOTH, expand=True)
+        # Add ActionPanel FIRST (at bottom) so it takes priority in packing order
+        self._action_panel = ActionPanel(
+            parent=self._window,
+            capture_callback=lambda: self._root.get_clean_frame(),
+            close_callback=self.minimize_to_tray,
+            settings=self._root.settings,
+        )
+        # Note: ActionPanel already calls pack() in its __init__, so don't pack again
+
+        # Canvas fills remaining space above the action panel
+        self._canvas: tk_mod.Canvas = tk_mod.Canvas(
+            self._window, bg="black", highlightthickness=0
+        )
+        self._canvas.pack()
 
         self._photo_image = None   # holds reference to prevent GC
         self._canvas_image_id = None
@@ -90,13 +104,15 @@ class MainWindow:
 
             # Resize window and canvas to match the frame every update;
             # clamp to screen dimensions in case of unusually large cameras.
+            # Account for the action panel height at the bottom.
             sw = self._window.winfo_screenwidth()
             sh = self._window.winfo_screenheight()
             cw = min(w, sw)
-            ch = min(h, sh)
-            self._window.geometry(f"{cw}x{ch}")
+            ch = min(h, sh - ACTION_PANEL_HEIGHT)  # Leave room for action panel
+            total_h = ch + ACTION_PANEL_HEIGHT  # Include action panel in window height
+            self._window.geometry(f"{cw}x{total_h}")
             self._canvas.config(width=cw, height=ch)
-            logger.debug("MainWindow geometry: %dx%d (frame=%dx%d).", cw, ch, w, h)
+            logger.debug("MainWindow geometry: %dx%d (frame=%dx%d, action_panel=%d).", cw, total_h, w, h, ACTION_PANEL_HEIGHT)
 
             # Draw bounding-box overlays onto a copy of the frame
             annotated = draw_detections(frame_bgr, detections)
@@ -118,6 +134,7 @@ class MainWindow:
                 self._canvas.itemconfig(self._canvas_image_id, image=photo)
 
             self._photo_image = photo  # keep reference to prevent GC
+
 
         except Exception:
             logger.exception("Error updating MainWindow frame.")
@@ -151,6 +168,12 @@ class MainWindow:
                 font=("Helvetica", 12),
                 tags=(tag,),
             )
+
+    def minimize_to_tray(self) -> None:
+        """Hide the window and minimize to tray (can be shown again later)."""
+        logger.debug("MainWindow minimized to tray.")
+        self._window.withdraw()
+        self._root._main_window_visible = False
 
     def _on_close(self) -> None:
         """Destroy the window and clear the reference on root."""
