@@ -188,7 +188,7 @@ class TestSaveRecording:
 class TestOpenAlertsFolder:
     def test_windows_uses_startfile(self, tmp_path):
         with patch("platform.system", return_value="Windows"), \
-             patch("os.startfile") as mock_start:
+             patch("os.startfile", create=True) as mock_start:
             open_alerts_folder(alerts_dir=tmp_path)
         mock_start.assert_called_once_with(str(tmp_path))
 
