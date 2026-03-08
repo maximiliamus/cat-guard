@@ -70,7 +70,7 @@ The GitHub Actions workflow (`build.yml`) configures:
 |---------|-------|
 | Triggers | `push` to `main` (CI); `push` of `v*` tag (release) |
 | Build matrix | `windows-latest`, `macos-latest`, `ubuntu-latest` |
-| Python version | `3.11` |
+| Python version | `3.14` |
 | PyInstaller mode | `--onedir` + zip |
 | Artifact retention | 7 days |
 | Release action | `softprops/action-gh-release@v2` |

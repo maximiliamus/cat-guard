@@ -6,7 +6,7 @@
 
 ## Prerequisites
 
-- Python 3.11+ with virtual environment activated
+- Python 3.14+ with virtual environment activated
 - All CatGuard dependencies installed (`pip install -e .`)
 - PyInstaller and hooks: `pip install pyinstaller pyinstaller-hooks-contrib`
 - **Linux only**: `sudo apt-get install -y python3-tk`

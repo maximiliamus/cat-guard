@@ -9,7 +9,7 @@ Package CatGuard as a self-contained executable (no Python required) for Windows
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+
+**Language/Version**: Python 3.14+
 **Primary Dependencies**: PyInstaller 6.x, pyinstaller-hooks-contrib; existing: ultralytics, opencv-python, pystray, Pillow, pygame-ce, sounddevice, soundfile, pywin32 (Windows), tkinter
 **Storage**: N/A — no new persistent storage layer
 **Testing**: pytest (existing, unchanged); CI build + artifact upload as integration test; manual smoke test of built executable against acceptance criteria
@@ -30,7 +30,7 @@ Package CatGuard as a self-contained executable (no Python required) for Windows
 | III. Simplicity & Clarity | ✅ PASS | PyInstaller + one spec file is the minimal approach; source patch is 4 lines; no new abstraction layers |
 | IV. Integration Testing | ✅ PASS | CI build verifies packaging contract; smoke test of executable covers acceptance criteria |
 | V. Versioning & Breaking Changes | ✅ PASS | `v*` tags trigger release; semantic versioning via existing `pyproject.toml`; no breaking changes to user-facing API |
-| Tech Constraints | ✅ PASS | Python 3.11+; PyInstaller is dev/CI tooling only (not a new runtime dependency) |
+| Tech Constraints | ✅ PASS | Python 3.14+; PyInstaller is dev/CI tooling only (not a new runtime dependency) |
 | Quality Gates | ✅ PASS | CI must pass before merge; partial releases allowed (individual platform failures do not block release per FR-003); existing pytest suite runs in CI before packaging |
 
 **Post-Phase 1 re-check**: PASS — design (spec file + workflow) adds no violations. The `main.py` patch is a 4-line addition; it does not increase complexity beyond what is strictly necessary.

@@ -17,6 +17,18 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _get_resource_dir() -> Path:
+    """Return the root resource directory for both dev and packaged environments.
+
+    In a PyInstaller bundle, ``sys.frozen`` is True and ``sys._MEIPASS`` points
+    to the directory where bundled data files are extracted.  In development,
+    fall back to three levels up from this file (the repository root).
+    """
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).parent.parent.parent
+
+
 def _monitor_playback_done(on_done: "Callable") -> None:
     """Start a daemon thread that waits for pygame playback to finish.
 
@@ -75,7 +87,7 @@ def main() -> None:
     # 3. Audio
     # ------------------------------------------------------------------
     init_audio()
-    assets_dir = Path(__file__).parent.parent.parent / "assets" / "sounds"
+    assets_dir = _get_resource_dir() / "assets" / "sounds"
     default_sound = assets_dir / "default.wav"
 
     # ------------------------------------------------------------------

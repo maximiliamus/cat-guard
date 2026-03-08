@@ -22,8 +22,15 @@ from catguard.config import Settings
 
 logger = logging.getLogger(__name__)
 
-_ICON_PATH = Path(__file__).parent.parent.parent / "assets" / "icon.png"
-_ICON_ICO_PATH = Path(__file__).parent.parent.parent / "assets" / "icon.ico"
+def _assets_root() -> Path:
+    """Return the assets root for both dev and packaged (PyInstaller) environments."""
+    import sys
+    if getattr(sys, 'frozen', False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).parent.parent.parent
+
+_ICON_PATH = _assets_root() / "assets" / "icon.png"
+_ICON_ICO_PATH = _assets_root() / "assets" / "icon.ico"
 
 # Pause/Continue tracking state colors (T024)
 TRACKING_ACTIVE_COLOR = (0, 255, 0)  # Bright green RGB

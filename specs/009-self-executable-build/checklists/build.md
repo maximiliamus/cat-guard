@@ -16,7 +16,7 @@
   > **PASS** — data-model.md specifies the else-branch: `Path(__file__).parent.parent.parent`. Development mode is covered.
 
 - [x] CHK003 - Does the spec define requirements for which Python version the CI runners must use, and is that version pinned or floating? [Completeness, Spec §FR-003]
-  > **PASS** — plan.md specifies Python 3.11. Constitution constrains Python 3.11+. Sufficient.
+  > **PASS** — plan.md specifies Python 3.14. Constitution constrains Python 3.14+. Sufficient.
 
 - [x] CHK004 - Are requirements defined for what "CI verification" means in FR-003 — is a successful build sufficient, or must the executable also be launched headlessly to verify it starts? [Completeness, Spec §FR-003]
   > **PASS** — Resolved. FR-003 updated to define CI verification as: successfully building all three platform executables per FR-006. No runtime smoke test required.
