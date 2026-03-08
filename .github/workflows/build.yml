@@ -21,12 +21,12 @@ jobs:
           - os: windows-latest
             platform: windows
             executable: catguard.exe
-          - os: macos-latest
-            platform: macos
-            executable: catguard
-          - os: ubuntu-latest
-            platform: linux
-            executable: catguard
+          # - os: macos-latest
+          #   platform: macos
+          #   executable: catguard
+          # - os: ubuntu-latest
+          #   platform: linux
+          #   executable: catguard
 
     steps:
       - name: Checkout
