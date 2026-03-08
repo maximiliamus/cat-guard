@@ -3,6 +3,7 @@
 TDD approach: Write tests before implementation. These tests will FAIL until
 the PhotoWindow and ActionPanel UI components are implemented.
 """
+import os
 import pytest
 from unittest.mock import MagicMock, patch, mock_open, call
 from datetime import datetime
@@ -13,6 +14,14 @@ import numpy as np
 # Note: tkinter is only available in integration tests
 pytest.importorskip("tkinter")
 import tkinter as tk
+
+# Skip the entire module when Tcl/Tk cannot create a real window (headless CI).
+try:
+    _root_check = tk.Tk()
+    _root_check.withdraw()
+    _root_check.destroy()
+except Exception as _tcl_err:
+    pytest.skip(f"Tcl/Tk display not available: {_tcl_err}", allow_module_level=True)
 
 
 class TestPhotoWindowBasics:
@@ -507,33 +516,35 @@ class TestCountdownBehavior:
     
     def test_countdown_button_suppresses_clicks_during_countdown(self):
         """Clicks are ignored while countdown is active."""
+        if os.environ.get("CI"):
+            pytest.skip("Countdown timing tests skipped in CI")
+
         from catguard.ui.action_panel import ActionPanel
         from catguard.config import Settings
-        
+
         root = tk.Tk()
         try:
             mock_capture = MagicMock()
-            settings = Settings(photo_countdown_seconds=1)
+            settings = Settings(photo_countdown_seconds=3)
             panel = ActionPanel(
                 parent=root,
                 capture_callback=mock_capture,
                 close_callback=MagicMock(),
                 settings=settings,
             )
-            
+
             delay_btn = self._get_button_by_label(panel, "Take photo with delay")
-            
-            # Simulate double-click during countdown
+
+            # First click starts the countdown
             delay_btn.invoke()
-            root.after(100)  # Let first countdown start
-            delay_btn.invoke()  # This should be ignored
-            root.after(100)
-            
-            # Only one capture should have occurred (after countdown completes)
-            # Note: Full timing verification happens in e2e test; here we just
-            # verify the button state doesn't allow multiple invocations
-            pytest.skip("Full countdown timing tests require async/threading setup")
-            
+            assert panel._countdown_active, "Countdown should be active after first click"
+
+            # Second click during countdown should be suppressed (flag stays True,
+            # no additional countdown initiated, capture not called yet)
+            delay_btn.invoke()
+            assert panel._countdown_active, "Countdown should still be active — second click suppressed"
+            mock_capture.assert_not_called()
+
             panel._frame.destroy()
         finally:
             root.destroy()
