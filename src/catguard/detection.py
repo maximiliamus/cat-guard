@@ -325,16 +325,26 @@ class DetectionLoop:
 
     def _load_model(self) -> None:
         """Lazy-load the YOLO model (runs once inside the daemon thread).
-        
+
         Cached in memory across pause/resume cycles for efficiency.
+        In PyInstaller frozen builds, resolves the model path from sys._MEIPASS
+        so the bundled yolo11n.pt is found regardless of the working directory.
         """
         if self._model is not None:
             return  # Model already loaded, reuse it
-        
+
+        import sys
+        from pathlib import Path
+
         from ultralytics import YOLO
 
-        self._model = YOLO(MODEL_NAME)
-        logger.info("YOLO model loaded: %s", MODEL_NAME)
+        if getattr(sys, "frozen", False):
+            model_path = Path(sys._MEIPASS) / MODEL_NAME
+        else:
+            model_path = Path(MODEL_NAME)
+
+        self._model = YOLO(str(model_path))
+        logger.info("YOLO model loaded: %s", model_path)
 
     def _cooldown_elapsed(self) -> bool:
         """Return True if enough time has passed since the last alert."""
@@ -348,10 +358,27 @@ class DetectionLoop:
     def _run(self) -> None:
         """Main detection loop — runs inside the daemon thread."""
         import cv2  # lazy import
+        import platform as _platform
 
-        self._load_model()
+        try:
+            self._load_model()
+        except Exception:
+            error_msg = f"Failed to load YOLO model ({MODEL_NAME})."
+            logger.exception(error_msg)
+            self.pause()
+            if self._on_error_callback:
+                try:
+                    self._on_error_callback(error_msg)
+                except Exception:
+                    logger.exception("Error callback raised an exception.")
+            return
 
-        cap = cv2.VideoCapture(self._settings.camera_index)
+        # On Windows use DirectShow (consistent with list_cameras()); the
+        # default MSMF backend is unreliable in PyInstaller-packaged builds.
+        if _platform.system() == "Windows":
+            cap = cv2.VideoCapture(self._settings.camera_index, cv2.CAP_DSHOW)
+        else:
+            cap = cv2.VideoCapture(self._settings.camera_index)
         # Limit the internal OpenCV buffer to 1 frame so we always process
         # the most recent camera frame rather than stale buffered ones.
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -363,10 +390,14 @@ class DetectionLoop:
             pass  # Camera may not support zoom control
             
         if not cap.isOpened():
-            logger.warning(
-                "Could not open camera at index %d. Detection loop exiting.",
-                self._settings.camera_index,
-            )
+            error_msg = f"Could not open camera at index {self._settings.camera_index}."
+            logger.warning("%s Detection loop exiting.", error_msg)
+            self.pause()
+            if self._on_error_callback:
+                try:
+                    self._on_error_callback(error_msg)
+                except Exception:
+                    logger.exception("Error callback raised an exception.")
             return
 
         logger.info("Camera %d opened. Monitoring started.", self._settings.camera_index)

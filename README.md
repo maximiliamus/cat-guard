@@ -1,3 +1,33 @@
+# Download
+
+Pre-built executables are available on the [Releases](../../releases) page — no Python installation required.
+
+1. Go to **Releases** and download the zip for your platform:
+   - `catguard-{version}-windows.zip`
+   - `catguard-{version}-macos.zip`
+   - `catguard-{version}-linux.zip`
+2. Extract the zip.
+3. Run the executable inside the `catguard/` folder:
+   - **Windows**: `catguard\catguard.exe`
+   - **macOS / Linux**: `./catguard/catguard`
+
+On first run, CatGuard downloads the YOLO model (~6 MB) — internet access required once.
+
+## OS Security Warnings
+
+**Windows — SmartScreen**
+
+Because the executable is not code-signed, Windows may show a SmartScreen warning.
+To allow it: right-click the `.exe` → **Properties** → check **Unblock** → **OK**, then run again.
+Alternatively, click **More info** → **Run anyway** in the SmartScreen dialog.
+
+**macOS — Gatekeeper**
+
+macOS blocks unsigned apps by default.
+To allow it: open **System Settings** → **Privacy & Security** → scroll to the blocked app → click **Open Anyway**.
+
+---
+
 # Overview
 
 CatGuard is an application that uses a webcam to monitor your table for your cat. If a cat is detected on the table, the app plays a sound to scare it away. So, it protects your work table from your cat and protects your cat from you - your punishment if it accidentally breaks something on your table :-)

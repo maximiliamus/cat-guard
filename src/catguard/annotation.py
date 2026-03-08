@@ -142,7 +142,7 @@ def annotate_frame(
 
     # --- Layer 3: Outcome overlay bottom strip (T018) ----------------------
     if outcome == "deterred":
-        _draw_outcome_strip(out, SUCCESS_BG, "Cat left \u2014 alert worked!")
+        _draw_outcome_strip(out, SUCCESS_BG, "Cat disappeared after alert")
     elif outcome == "remained":
         _draw_outcome_strip(out, FAILURE_BG, "Cat remained after alert")
     else:
