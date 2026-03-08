@@ -46,7 +46,7 @@ class ActionPanel:
         self._settings = settings
         self._last_save_dir: Optional[str] = None
         
-        # Frame container — pack_propagate(False) enforces exactly 50px height
+        # Frame container — pack_propagate(False) enforces exactly 40px height
         self._frame: tk.Frame = tk.Frame(parent, bg="lightgray", height=ACTION_PANEL_HEIGHT)
         self._frame.pack(side=tk.BOTTOM, fill=tk.X)
         self._frame.pack_propagate(False)
