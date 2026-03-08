@@ -9,7 +9,7 @@ Add a persistent action panel at the bottom of the main window with `Take photo`
 
 ## Technical Context
 
-**Language/Version**: Python 3.11  
+**Language/Version**: Python 3.14  
 **Primary Dependencies**: tkinter (UI), opencv-python / `cv2` (JPEG encoding, reused from `screenshots.py`), pydantic-settings (Settings model in `config.py`)  
 **Storage**: Local filesystem only — date-organised JPEG files under `photos_directory`; transient in-memory `Photo` dataclass (no DB)  
 **Testing**: pytest, pytest-mock; tkinter UI tested via integration tests with mocked file dialog  

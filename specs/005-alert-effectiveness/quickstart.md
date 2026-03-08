@@ -7,7 +7,7 @@
 
 ## Prerequisites
 
-- Python 3.11+ virtual environment activated
+- Python 3.14+ virtual environment activated
 - `pip install -e .` completed (installs `opencv-python`, `ultralytics`, `numpy`, etc.)
 - Webcam connected and accessible
 - `yolo11n.pt` model file present at repository root

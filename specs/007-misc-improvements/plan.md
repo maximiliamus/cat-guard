@@ -11,7 +11,7 @@ All five items are independent slices; each can be implemented and tested withou
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+  
+**Language/Version**: Python 3.14+  
 **Primary Dependencies**: tkinter (UI), pystray (tray), pygame-ce (audio), OpenCV + Pillow (frame annotation), pydantic (settings), pywin32 ≥ 306 (Windows — already in deps)  
 **Storage**: JSON settings file via `platformdirs.user_config_dir("CatGuard")`  
 **Testing**: pytest, pytest-mock  

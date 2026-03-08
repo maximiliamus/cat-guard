@@ -8,7 +8,7 @@ Step-by-step guide to manually verify the *Screenshot on Cat Detection* feature.
 
 | Requirement | Notes |
 |---|---|
-| Python 3.11+ | `python --version` |
+| Python 3.14+ | `python --version` |
 | Webcam / capture device | Any device recognised by OpenCV |
 | CatGuard installed | `pip install -e .` from repo root |
 | YOLO model present | `yolo11n.pt` in repo root |

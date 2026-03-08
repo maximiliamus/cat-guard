@@ -128,7 +128,7 @@ A user adjusts detection sensitivity and manages a library of alert sounds. When
 ## Assumptions
 
 - Users have at least one compatible web camera.
-- The app runs on Python 3.11+.
+- The app runs on Python 3.14+.
 - Detection uses a YOLO object detection model to identify cats in camera frames.
 - Sound playback uses system audio.
 - No cloud dependencies required for core detection.

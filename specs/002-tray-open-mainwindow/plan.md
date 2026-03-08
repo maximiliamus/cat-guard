@@ -13,7 +13,7 @@ Add an **`Open`** item to the CatGuard system tray menu. Clicking it opens a new
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+  
+**Language/Version**: Python 3.14+  
 **Primary Dependencies**: tkinter (stdlib, main-thread UI), OpenCV (`cv2` — frame capture & image rendering), Pillow (frame → tkinter-compatible `PhotoImage`), pystray (tray menu), ultralytics YOLO (detection inference, already running in `DetectionLoop`)  
 **Storage**: N/A (no new persistence required)  
 **Testing**: pytest 8+, pytest-mock  

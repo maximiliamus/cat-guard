@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Python 3.11 or newer
+- Python 3.14 or newer
 - A webcam connected and accessible
 - (Linux only) For Wayland system tray support:  
   `sudo apt install python3-gi gir1.2-ayatanaappindicator3-0.1`

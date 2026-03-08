@@ -13,7 +13,7 @@ When a cat is detected and the alert sound fires, capture the camera frame and s
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+  
+**Language/Version**: Python 3.14+  
 **Primary Dependencies**: OpenCV `cv2` (JPEG encoding — already a runtime dependency), `platformdirs` (transitive via ultralytics — `user_pictures_dir()`), `pystray` (tray `notify()` for failure notifications — already a runtime dependency), `pydantic` (Settings model extension), `tkinter` (settings UI — stdlib)  
 **Storage**: JPEG files on local disk (`<root>/<yyyy-mm-dd>/<HH-MM-SS[-N]>.jpg`)  
 **Testing**: pytest 8+, pytest-mock  

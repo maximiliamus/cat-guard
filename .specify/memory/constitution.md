@@ -41,7 +41,7 @@ Rationale: Maintains user trust and enables safe upgrades.
 
 ## Technology & Security Constraints
 
-All code MUST use Python 3.11+ and standard libraries unless otherwise justified. Security best practices MUST be followed for all user data and external integrations. Performance goals: <200ms p95 latency for detection, <100MB memory footprint for core service.
+All code MUST use Python 3.14+ and standard libraries unless otherwise justified. Security best practices MUST be followed for all user data and external integrations. Performance goals: <200ms p95 latency for detection, <100MB memory footprint for core service.
 
 
 ## Development Workflow & Quality Gates

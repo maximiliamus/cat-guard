@@ -13,7 +13,7 @@ The detection engine suppresses alert sounds while recording is active.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+
+**Language/Version**: Python 3.14+
 **Primary Dependencies**: tkinter (UI), pydantic + platformdirs (config/paths),
 pygame-ce (playback), `sounddevice` + `soundfile` *(NEW — mic capture & WAV I/O)*,
 pytest + pytest-mock (testing)

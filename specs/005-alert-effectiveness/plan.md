@@ -16,7 +16,7 @@ asynchronously on a daemon thread so the detection loop is never blocked.
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+
+**Language/Version**: Python 3.14+
 **Primary Dependencies**: `opencv-python` / `cv2` (annotation), `numpy` (frame buffer),
 `ultralytics` YOLO (detection + verification), `platformdirs` (save paths),
 `pydantic` (settings), `pygame-ce` (audio), `pytest` + `pytest-mock` (testing)

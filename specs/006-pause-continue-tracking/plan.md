@@ -9,7 +9,7 @@ Add pause/continue tracking control via a single menu item that toggles the dete
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+  
+**Language/Version**: Python 3.14+  
 **Primary Dependencies**: 
 - `pystray` (tray icon management)
 - `ultralytics` (YOLO model)

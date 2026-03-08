@@ -13,7 +13,7 @@ CatGuard is a cross-platform desktop application that monitors a webcam for cats
 
 ## Technical Context
 
-**Language/Version**: Python 3.11+  
+**Language/Version**: Python 3.14+  
 **Primary Dependencies**:
 - `ultralytics` — YOLO11n cat detection (`yolo11n.pt`, COCO class 15)
 - `opencv-python` — webcam capture (`VideoCapture`)
