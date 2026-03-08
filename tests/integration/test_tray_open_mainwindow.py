@@ -82,7 +82,7 @@ class TestTrayOpenMainWindow:
         with patch("PIL.ImageTk.PhotoImage", return_value=MagicMock()):
             win.update_frame(frame, [detection])
 
-        mock_toplevel.geometry.assert_called_with("640x480")
+        mock_toplevel.geometry.assert_called_with("640x520")
 
     def test_update_frame_annotates_frame_via_draw_detections(self, headless_main_window):
         """draw_detections must be called and must annotate the frame with a bounding box."""

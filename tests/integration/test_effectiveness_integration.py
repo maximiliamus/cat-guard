@@ -123,7 +123,10 @@ class TestEffectivenessIntegrationDeterred:
         # Check a pixel near the bottom-center of the frame.
         h, w = saved.shape[:2]
         center_x = w // 2
-        strip_y = _bottom_strip_center_y(saved)
+        # Sample near the bottom edge of the strip (last few rows), safely below the
+        # text baseline — the outcome label can be wider than the test frame and the
+        # text glyphs occupy the vertical center of the strip, not its bottom edge.
+        strip_y = h - 3
         b, g, r = _pixel_color_at(saved, strip_y, center_x)
 
         # Green channel should dominate and red/blue should be low.

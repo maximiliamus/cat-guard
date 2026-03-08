@@ -74,6 +74,26 @@ On first run, CatGuard will:
 - Spec-driven with [Spec Kit](https://github.com/github/spec-kit)
 - Cross-platform
 
+## Running Tests
+
+Install dev dependencies first:
+
+```bash
+pip install -e ".[dev]"
+```
+
+| Command | What it runs |
+|---|---|
+| `pytest` | All tests |
+| `pytest -m "not integration"` | Unit tests only (used in CI) |
+| `pytest -m integration` | Integration tests only |
+| `pytest tests/unit/` | All unit tests by directory |
+| `pytest tests/integration/` | All integration tests by directory |
+| `pytest tests/unit/test_main_window.py` | A single test file |
+| `pytest tests/unit/test_main_window.py::TestUpdateFrame` | A single test class |
+
+> **Note:** Integration tests marked with `@pytest.mark.integration` require real package installs (cv2, ultralytics). Tests without this marker run in all modes.
+
 
 # Interesting Facts
 
