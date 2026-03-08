@@ -33,7 +33,7 @@ def _install_stub(dotted_name: str) -> MagicMock:
 
 
 # Only stub packages that are genuinely absent — don't clobber real installs.
-for _pkg in ("cv2", "ultralytics", "pygame", "pygame.mixer"):
+for _pkg in ("cv2", "ultralytics", "pygame", "pygame.mixer", "pystray"):
     try:
         __import__(_pkg)
     except ModuleNotFoundError:
