@@ -11,7 +11,7 @@ Pre-built executables are available on the [Releases](../../releases) page — n
    - **Windows**: `catguard\catguard.exe`
    - **macOS / Linux**: `./catguard/catguard`
 
-On first run, CatGuard downloads the YOLO model (~6 MB) — internet access required once.
+The YOLO model is bundled inside the zip — no internet access required.
 
 ## OS Security Warnings
 
@@ -61,12 +61,9 @@ python -m catguard
 ```
 
 On first run, CatGuard will:
-1. Download the YOLO11n model weights (~6 MB) to the following locations (internet required once only):
-   - **Linux/macOS**: `~/.ultralytics/assets/`
-   - **Windows**: `%USERPROFILE%\.ultralytics\assets\`
-2. Create a default config file at the platform config directory.
-3. Start monitoring using camera index `0` with default settings.
-4. Appear in the system tray.
+1. Create a default config file at the platform config directory.
+2. Start monitoring using camera index `0` with default settings.
+3. Appear in the system tray.
 
 # Development
 
@@ -92,11 +89,55 @@ pip install -e ".[dev]"
 | `pytest tests/unit/test_main_window.py` | A single test file |
 | `pytest tests/unit/test_main_window.py::TestUpdateFrame` | A single test class |
 
-> **Note:** Integration tests marked with `@pytest.mark.integration` require real package installs (cv2, ultralytics). Tests without this marker run in all modes.
+> **Note:** Integration tests marked with `@pytest.mark.integration` require real package installs (cv2, onnxruntime) and `yolo11n.onnx` in the project root. Tests without this marker run in all modes.
 
+
+## Building the Executable
+
+Requires the build extras and PyInstaller:
+
+```bash
+pip install -e ".[dev,build]"
+```
+
+**Prerequisites**
+
+- `yolo11n.onnx` must be present in the project root (already committed).
+- **Linux**: install system libraries before building:
+  ```bash
+  sudo apt-get install -y python3-tk libportaudio2 libsndfile1
+  ```
+
+**Build**
+
+```bash
+pyinstaller catguard.spec --clean --noconfirm
+```
+
+Output is placed in `dist/catguard/`. The entry point is:
+
+| Platform | Executable |
+|----------|-----------|
+| Windows | `dist\catguard\catguard.exe` |
+| macOS | `dist/catguard/catguard` |
+| Linux | `dist/catguard/catguard` |
+
+**Package into a zip**
+
+```bash
+# Windows (PowerShell)
+Compress-Archive -Path dist\catguard -DestinationPath catguard-windows.zip
+
+# macOS / Linux
+cd dist && zip -r ../catguard-linux.zip catguard
+```
+
+The CI workflow (`.github/workflows/build.yml`) runs the full build + test + package cycle automatically on every push to `master` and on version tags (`v*`).
+
+---
 
 # Interesting Facts
 
 - The default sound is "Tom spells CAT" from [Tom and Jerry Online](https://www.tomandjerryonline.com/sounds.cfm).
 - Not a single line of Python code was written by a human.
-- Despite its features, this app still doesn't help me with my cat :-)
+- It works! :-)

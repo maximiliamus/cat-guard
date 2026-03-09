@@ -1,15 +1,15 @@
 """Integration tests for CatGuard detection pipeline.
 
-These tests load the REAL YOLO11n model and run inference on synthetic frames.
+These tests load the REAL YOLO11n ONNX model and run inference on synthetic frames.
 They are marked @pytest.mark.integration and should be run separately from unit
 tests, as they:
-  - Download ~6 MB YOLO11n weights on first run (cached at ~/.ultralytics/assets/)
+  - Require yolo11n.onnx to be present in the project root
   - Are noticeably slower than unit tests (~1–3 s per test on CPU)
 
 Run with:
     pytest tests/integration/test_detection_integration.py -v -m integration
 
-SKIP CONDITION: If the ultralytics package is not installed, all tests in this
+SKIP CONDITION: If the onnxruntime package is not installed, all tests in this
 module are skipped automatically.
 """
 from __future__ import annotations
@@ -21,11 +21,19 @@ from datetime import datetime, timezone
 import numpy as np
 import pytest
 
-# Skip the entire module gracefully if ultralytics is not installed
-pytest.importorskip("ultralytics", reason="ultralytics not installed — skipping detection integration tests")
+# Skip the entire module gracefully if onnxruntime is not installed
+pytest.importorskip("onnxruntime", reason="onnxruntime not installed — skipping detection integration tests")
 
 from catguard.config import Settings
-from catguard.detection import DetectionAction, DetectionEvent, DetectionLoop
+from catguard.detection import (
+    CAT_CLASS_ID,
+    _INPUT_SIZE,
+    _postprocess,
+    _preprocess_frame,
+    DetectionAction,
+    DetectionEvent,
+    DetectionLoop,
+)
 
 
 def _make_blank_frame(height: int = 480, width: int = 640) -> "np.ndarray":
@@ -35,7 +43,7 @@ def _make_blank_frame(height: int = 480, width: int = 640) -> "np.ndarray":
 
 @pytest.mark.integration
 class TestDetectionIntegration:
-    """Tests against the real YOLO model with synthetic / near-blank frames."""
+    """Tests against the real ONNX model with synthetic / near-blank frames."""
 
     def test_no_callback_on_blank_frame(self):
         """A blank black frame should not trigger the callback."""
@@ -46,23 +54,21 @@ class TestDetectionIntegration:
             callback_events.append(event)
 
         loop = DetectionLoop(settings, on_detected)
-        # Run a single iteration manually without the camera
         loop._load_model()
         frame = _make_blank_frame()
 
-        results = loop._model.predict(frame, conf=settings.confidence_threshold, classes=[15], device="cpu", verbose=False)
-        for result in results:
-            boxes = result.boxes
-            if boxes is not None and len(boxes) > 0:
-                for box in boxes:
-                    conf_val = float(box.conf[0])
-                    if loop._cooldown_elapsed():
-                        loop._last_alert_time = datetime.now(timezone.utc)
-                        on_detected(DetectionEvent(
-                            timestamp=datetime.now(timezone.utc),
-                            confidence=conf_val,
-                            action=DetectionAction.SOUND_PLAYED,
-                        ))
+        blob = _preprocess_frame(frame, _INPUT_SIZE)
+        raw = loop._model.run(None, {loop._model_input_name: blob})[0]
+        boxes = _postprocess(raw, settings.confidence_threshold, CAT_CLASS_ID, frame.shape)
+
+        for box in boxes:
+            if loop._cooldown_elapsed():
+                loop._last_alert_time = datetime.now(timezone.utc)
+                on_detected(DetectionEvent(
+                    timestamp=datetime.now(timezone.utc),
+                    confidence=box.confidence,
+                    action=DetectionAction.SOUND_PLAYED,
+                ))
 
         # A blank frame should produce 0 detections → no callback
         assert len(callback_events) == 0
@@ -100,15 +106,15 @@ class TestDetectionIntegration:
         assert len(suppressed) == 1
 
     def test_model_loads_without_error(self):
-        """YOLO model should load from cache or download without raising."""
+        """ONNX model should load without raising."""
         settings = Settings()
         loop = DetectionLoop(settings, lambda e: None)
         loop._load_model()
         assert loop._model is not None
+        assert loop._model_input_name is not None
 
     def test_detection_loop_start_stop(self):
         """DetectionLoop should start and stop cleanly with a fake camera."""
-        import cv2
         from unittest.mock import MagicMock, patch
 
         settings = Settings(camera_index=0)

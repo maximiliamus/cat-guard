@@ -1,7 +1,7 @@
-"""Cat detection module using YOLO11n.
+"""Cat detection module using YOLO11n (ONNX runtime).
 
 Responsibilities:
-- DetectionLoop: background daemon thread running YOLO inference on webcam frames
+- DetectionLoop: background daemon thread running ONNX inference on webcam frames
 - list_cameras(): enumerate available camera indices via OpenCV
 - DetectionEvent / DetectionAction: data model for detection outcomes
 - Cooldown logic to suppress rapid-repeat alerts
@@ -30,7 +30,8 @@ logger = logging.getLogger(__name__)
 
 # YOLO COCO class index for 'cat'
 CAT_CLASS_ID = 15
-MODEL_NAME = "yolo11n.pt"
+MODEL_NAME = "yolo11n.onnx"
+_INPUT_SIZE = 640  # ONNX model input resolution
 
 
 class CameraError(Exception):
@@ -64,6 +65,80 @@ class BoundingBox:
     y2: int
     confidence: float
     label: str = "cat"
+
+
+def _preprocess_frame(frame: "np.ndarray", size: int) -> "np.ndarray":
+    """Letterbox a BGR frame to *size*×*size* and return a float32 (1,3,H,W) blob."""
+    import cv2
+
+    h, w = frame.shape[:2]
+    scale = size / max(h, w)
+    new_w = int(round(w * scale))
+    new_h = int(round(h * scale))
+    resized = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+
+    # Center-pad with gray (114) to produce a square canvas
+    pad_top = (size - new_h) // 2
+    pad_left = (size - new_w) // 2
+    canvas = np.full((size, size, 3), 114, dtype=np.uint8)
+    canvas[pad_top : pad_top + new_h, pad_left : pad_left + new_w] = resized
+
+    # BGR → RGB, HWC → CHW, [0,255] → [0,1]
+    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB)
+    chw = rgb.transpose(2, 0, 1).astype(np.float32) / 255.0
+    return chw[np.newaxis]  # (1, 3, size, size)
+
+
+def _postprocess(
+    raw: "np.ndarray",
+    conf_threshold: float,
+    target_class: int,
+    frame_shape: tuple,
+) -> "list[BoundingBox]":
+    """Decode raw YOLO11 ONNX output into BoundingBox objects.
+
+    *raw* has shape (1, 84, 8400): 4 box coords + 80 class scores × 8400 anchors.
+    Applies confidence filtering and NMS; scales boxes back to original frame size.
+    """
+    import cv2
+
+    h_frame, w_frame = frame_shape[:2]
+    scale = _INPUT_SIZE / max(h_frame, w_frame)
+    new_h = int(round(h_frame * scale))
+    new_w = int(round(w_frame * scale))
+    pad_top = (_INPUT_SIZE - new_h) // 2
+    pad_left = (_INPUT_SIZE - new_w) // 2
+
+    preds = raw[0].T  # (8400, 84)
+    xc, yc, bw, bh = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
+    cat_scores = preds[:, 4 + target_class]
+
+    mask = cat_scores >= conf_threshold
+    if not mask.any():
+        return []
+
+    xc, yc, bw, bh = xc[mask], yc[mask], bw[mask], bh[mask]
+    scores = cat_scores[mask]
+    x1 = xc - bw / 2
+    y1 = yc - bh / 2
+
+    # NMS expects (x, y, w, h) format
+    bboxes_xywh = np.stack([x1, y1, bw, bh], axis=1).astype(np.float32).tolist()
+    indices = cv2.dnn.NMSBoxes(bboxes_xywh, scores.tolist(), conf_threshold, 0.45)
+
+    flat: list[int] = (
+        indices.flatten().tolist()
+        if hasattr(indices, "flatten") and len(indices) > 0
+        else []
+    )
+    result: list[BoundingBox] = []
+    for i in flat:
+        bx1 = max(0, int((x1[i] - pad_left) / scale))
+        by1 = max(0, int((y1[i] - pad_top) / scale))
+        bx2 = min(w_frame, int((x1[i] + bw[i] - pad_left) / scale))
+        by2 = min(h_frame, int((y1[i] + bh[i] - pad_top) / scale))
+        result.append(BoundingBox(bx1, by1, bx2, by2, float(scores[i])))
+    return result
 
 
 @dataclass
@@ -159,6 +234,7 @@ class DetectionLoop:
         self._stop_event = threading.Event()
         self._last_alert_time: Optional[datetime] = None
         self._model = None
+        self._model_input_name: Optional[str] = None
         self._frame_callback: Optional[Callable] = None
         self._frame_callback_lock = threading.Lock()
         self._pending_frame: Optional["np.ndarray"] = None
@@ -324,11 +400,11 @@ class DetectionLoop:
     # ------------------------------------------------------------------
 
     def _load_model(self) -> None:
-        """Lazy-load the YOLO model (runs once inside the daemon thread).
+        """Lazy-load the ONNX model (runs once inside the daemon thread).
 
         Cached in memory across pause/resume cycles for efficiency.
         In PyInstaller frozen builds, resolves the model path from sys._MEIPASS
-        so the bundled yolo11n.pt is found regardless of the working directory.
+        so the bundled yolo11n.onnx is found regardless of the working directory.
         """
         if self._model is not None:
             return  # Model already loaded, reuse it
@@ -336,15 +412,18 @@ class DetectionLoop:
         import sys
         from pathlib import Path
 
-        from ultralytics import YOLO
+        import onnxruntime as ort
 
         if getattr(sys, "frozen", False):
             model_path = Path(sys._MEIPASS) / MODEL_NAME
         else:
             model_path = Path(MODEL_NAME)
 
-        self._model = YOLO(str(model_path))
-        logger.info("YOLO model loaded: %s", model_path)
+        self._model = ort.InferenceSession(
+            str(model_path), providers=["CPUExecutionProvider"]
+        )
+        self._model_input_name = self._model.get_inputs()[0].name
+        logger.info("ONNX model loaded: %s", model_path)
 
     def _cooldown_elapsed(self) -> bool:
         """Return True if enough time has passed since the last alert."""
@@ -363,7 +442,7 @@ class DetectionLoop:
         try:
             self._load_model()
         except Exception:
-            error_msg = f"Failed to load YOLO model ({MODEL_NAME})."
+            error_msg = f"Failed to load ONNX model ({MODEL_NAME})."
             logger.exception(error_msg)
             self.pause()
             if self._on_error_callback:
@@ -432,61 +511,11 @@ class DetectionLoop:
                 # We run inference first below and store results; the trigger
                 # check is done AFTER inference so we have the current boxes.
 
-                # Resize frame for faster inference (480p) but keep original for display
-                try:
-                    h, w = frame.shape[:2]
-                except (AttributeError, ValueError):
-                    # Mock frame or invalid shape in tests
-                    h, w = 480, 640
-                    
-                if h > 0 and w > 0:
-                    scale = min(480.0 / h, 640.0 / w)
-                else:
-                    scale = 1.0
-                    
-                if scale < 1.0:
-                    small_frame = cv2.resize(frame, (int(w * scale), int(h * scale)))
-                else:
-                    small_frame = frame
-                    scale = 1.0  # No scaling needed
-
-                results = self._model.predict(
-                    small_frame,
-                    conf=conf,
-                    classes=[CAT_CLASS_ID],
-                    device="cpu",
-                    imgsz=640,
-                    verbose=False,
-                )
-
-                # Collect all bounding boxes from this frame's results.
-                # Scale boxes back to original frame size if we resized
-                all_boxes: list[BoundingBox] = []
-                max_conf = 0.0
-                for result in results:
-                    raw_boxes = result.boxes
-                    if raw_boxes is None or len(raw_boxes) == 0:
-                        continue
-                    names: dict = getattr(result, "names", {})
-                    for box in raw_boxes:
-                        _conf = float(box.conf[0])
-                        _cls = int(box.cls[0])
-                        _label = names.get(_cls, str(_cls))
-                        # Scale coordinates back to original frame size
-                        if scale < 1.0:
-                            x1 = max(0, min(int(box.xyxy[0][0] / scale), w - 1))
-                            y1 = max(0, min(int(box.xyxy[0][1] / scale), h - 1))
-                            x2 = max(0, min(int(box.xyxy[0][2] / scale), w - 1))
-                            y2 = max(0, min(int(box.xyxy[0][3] / scale), h - 1))
-                        else:
-                            x1 = max(0, min(int(box.xyxy[0][0]), w - 1))
-                            y1 = max(0, min(int(box.xyxy[0][1]), h - 1))
-                            x2 = max(0, min(int(box.xyxy[0][2]), w - 1))
-                            y2 = max(0, min(int(box.xyxy[0][3]), h - 1))
-                        all_boxes.append(
-                            BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, confidence=_conf, label=_label)
-                        )
-                        max_conf = max(max_conf, _conf)
+                # Run ONNX inference on the full frame (letterbox + normalize inside)
+                blob = _preprocess_frame(frame, _INPUT_SIZE)
+                raw_out = self._model.run(None, {self._model_input_name: blob})[0]
+                all_boxes = _postprocess(raw_out, conf, CAT_CLASS_ID, frame.shape)
+                max_conf = max((b.confidence for b in all_boxes), default=0.0)
 
                 # Verification trigger: fires once per pending cycle on the first
                 # post-cooldown frame.  Pending state is cleared BEFORE invoking
@@ -551,7 +580,7 @@ class DetectionLoop:
                     cb = self._frame_callback
                 if cb is not None:
                     try:
-                        cb(frame, results)
+                        cb(frame, all_boxes)
                     except Exception:  # pragma: no cover
                         logger.exception("Frame callback raised an exception.")
         finally:

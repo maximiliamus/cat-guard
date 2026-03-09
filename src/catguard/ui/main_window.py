@@ -149,13 +149,7 @@ class MainWindow:
 
     def _update_no_detections_label(self, detections) -> None:
         """Show or hide a 'No detections' text overlay."""
-        has_detections = False
-        if detections:
-            for result in detections:
-                boxes = getattr(result, "boxes", None)
-                if boxes is not None and len(boxes) > 0:
-                    has_detections = True
-                    break
+        has_detections = bool(detections)
 
         tag = "no_detections_label"
         self._canvas.delete(tag)
