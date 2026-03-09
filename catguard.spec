@@ -4,20 +4,21 @@
 # Build: pyinstaller catguard.spec --clean --noconfirm
 # Output: dist/catguard/  (--onedir bundle)
 #
-from PyInstaller.utils.hooks import collect_all
+import sys
 
-# Collect all ultralytics data, binaries, and hidden imports
-# (resolves the common cfg/default.yaml FileNotFoundError at runtime)
-ultralytics_datas, ultralytics_binaries, ultralytics_hiddenimports = collect_all('ultralytics')
+# pywin32 ships win32timezone only on Windows
+_win32_imports = ['win32timezone'] if sys.platform == 'win32' else []
+
+# .ico icon is Windows-only; macOS/Linux use no icon
+_icon = 'assets/icon.ico' if sys.platform == 'win32' else None
 
 a = Analysis(
     ['src/catguard/__main__.py'],
     pathex=[],
-    binaries=ultralytics_binaries,
+    binaries=[],
     datas=[
-        ('assets', 'assets'),          # bundle sounds/ and icon.ico
-        ('yolo11n.pt', '.'),           # bundle YOLO model (avoids download on first run)
-        *ultralytics_datas,
+        ('assets', 'assets'),           # bundle sounds/ and icon.ico
+        ('yolo11n.onnx', '.'),          # bundle ONNX model
     ],
     hiddenimports=[
         # pystray backends — selected at runtime; static analysis misses them
@@ -25,8 +26,8 @@ a = Analysis(
         'pystray._darwin',
         'pystray._xorg',
         'pystray._appindicator',
-        # pywin32 — frequently absent from auto-detection
-        'win32timezone',
+        # pywin32 — Windows only
+        *_win32_imports,
         # tkinter — not always auto-included (especially on Linux builds)
         'tkinter',
         'tkinter.ttk',
@@ -35,7 +36,6 @@ a = Analysis(
         'platformdirs.unix',
         'platformdirs.windows',
         'platformdirs.macos',
-        *ultralytics_hiddenimports,
     ],
     hookspath=[],
     hooksconfig={},
@@ -63,7 +63,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='assets/icon.ico',
+    icon=_icon,
 )
 
 coll = COLLECT(

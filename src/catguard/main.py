@@ -56,6 +56,9 @@ def main() -> None:
     """Main entry point. Initializes all subsystems and starts the event loop."""
     import tkinter as tk
 
+    from catguard.single_instance import ensure_single_instance
+    ensure_single_instance()
+
     from catguard.annotation import EffectivenessTracker
     from catguard.audio import init_audio, play_alert, shutdown_audio
     from catguard.config import load_settings, save_settings

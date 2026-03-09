@@ -108,12 +108,12 @@ def draw_label(
 def draw_detections(frame: np.ndarray, results) -> np.ndarray:
     """Return an annotated copy of *frame* with bounding boxes and class labels.
 
-    Iterates YOLO result objects (each having a `.boxes` attribute).
+    Accepts a list of BoundingBox objects (catguard.detection.BoundingBox).
     Returns the frame unchanged (as a copy) if *results* is empty or None.
 
     Args:
         frame:   BGR numpy array (h × w × 3).
-        results: List of YOLO result objects, or None / empty list.
+        results: List of BoundingBox objects, or None / empty list.
 
     Returns:
         A new numpy array with overlays drawn.
@@ -122,38 +122,28 @@ def draw_detections(frame: np.ndarray, results) -> np.ndarray:
     if not results:
         return out
     import cv2
-    for result in results:
-        boxes = getattr(result, "boxes", None)
-        if boxes is None:
-            continue
-        names: dict = getattr(result, "names", {})
-        for box in boxes:
-            try:
-                x1, y1, x2, y2 = (int(v) for v in box.xyxy[0])
-                conf = float(box.conf[0])
-                cls_id = int(box.cls[0])
-                name = names.get(cls_id, str(cls_id))
-                label = f"{name} {int(conf * 100)}%"
+    for box in results:
+        try:
+            label = f"{box.label} {int(box.confidence * 100)}%"
+            draw_bounding_box(out, (box.x1, box.y1, box.x2, box.y2))
 
-                draw_bounding_box(out, (x1, y1, x2, y2))
-
-                # Filled background rect + label above box top-left corner
-                _DRAW_THICKNESS = 1
-                (tw, th), baseline = cv2.getTextSize(
-                    label, cv2.FONT_HERSHEY_SIMPLEX, LABEL_FONT_SCALE, _DRAW_THICKNESS
-                )
-                label_x = x1
-                label_y = max(y1 - LABEL_PADDING, th + LABEL_PADDING)
-                cv2.rectangle(
-                    out,
-                    (label_x - LABEL_PADDING, label_y - th - LABEL_PADDING),
-                    (label_x + tw + LABEL_PADDING, label_y + baseline + LABEL_PADDING),
-                    BOX_COLOR,
-                    -1,
-                )
-                draw_label(out, label, (label_x, label_y), color=(0, 0, 0), thickness=_DRAW_THICKNESS)
-            except Exception:
-                logger.exception("Error drawing detection overlay for box %s", box)
+            # Filled background rect + label above box top-left corner
+            _DRAW_THICKNESS = 1
+            (tw, th), baseline = cv2.getTextSize(
+                label, cv2.FONT_HERSHEY_SIMPLEX, LABEL_FONT_SCALE, _DRAW_THICKNESS
+            )
+            label_x = box.x1
+            label_y = max(box.y1 - LABEL_PADDING, th + LABEL_PADDING)
+            cv2.rectangle(
+                out,
+                (label_x - LABEL_PADDING, label_y - th - LABEL_PADDING),
+                (label_x + tw + LABEL_PADDING, label_y + baseline + LABEL_PADDING),
+                BOX_COLOR,
+                -1,
+            )
+            draw_label(out, label, (label_x, label_y), color=(0, 0, 0), thickness=_DRAW_THICKNESS)
+        except Exception:
+            logger.exception("Error drawing detection overlay for box %s", box)
     return out
 
 

@@ -91,19 +91,17 @@ class TestCameraIndex:
 
 class TestNoDetectionPath:
     def test_no_callback_when_yolo_returns_no_boxes(self):
+        import numpy as _np
         settings = Settings()
         callback = MagicMock()
         loop = DetectionLoop(settings, callback)
-
-        mock_result = MagicMock()
-        mock_result.boxes = None
 
         frame_calls = [0]
 
         def read_side():
             frame_calls[0] += 1
             if frame_calls[0] == 1:
-                return True, MagicMock()
+                return True, _np.zeros((480, 640, 3), dtype=_np.uint8)
             loop._stop_event.set()
             return False, None
 
@@ -112,9 +110,8 @@ class TestNoDetectionPath:
             mock_cap.isOpened.return_value = True
             mock_cap.read.side_effect = read_side
             mock_cap_cls.return_value = mock_cap
-            mock_model = MagicMock()
-            mock_model.predict.return_value = [mock_result]
-            loop._model = mock_model
+            loop._model = MagicMock()
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
             with patch.object(loop, "_load_model"):
                 loop._run()
 
@@ -308,7 +305,10 @@ class TestOneEventPerFrame:
     """T003 — _run() must emit exactly one SOUND_PLAYED per frame regardless of box count."""
 
     def _run_loop_with_boxes(self, num_boxes: int, callback):
-        """Helper: run DetectionLoop._run() for one frame with num_boxes YOLO results."""
+        """Helper: run DetectionLoop._run() for one frame with num_boxes detections."""
+        import numpy as _np
+        from catguard.detection import BoundingBox
+
         settings = Settings()
         loop = DetectionLoop(settings, callback)
         # Force cooldown to be always elapsed so SOUND_PLAYED fires immediately.
@@ -317,24 +317,16 @@ class TestOneEventPerFrame:
         call_count = [0]
 
         def read_side_effect():
-            import numpy as _np
             call_count[0] += 1
             if call_count[0] == 1:
                 return True, _np.zeros((480, 640, 3), dtype=_np.uint8)
             loop._stop_event.set()
             return False, None
 
-        fake_boxes = []
-        for _ in range(num_boxes):
-            b = MagicMock()
-            b.conf = [0.85]
-            # xyxy[0] returns [x1, y1, x2, y2] as floats
-            b.xyxy = [[10.0, 20.0, 100.0, 200.0]]
-            b.cls = [15]
-            fake_boxes.append(b)
-
-        mock_result = MagicMock()
-        mock_result.boxes = fake_boxes if num_boxes > 0 else None
+        fake_boxes = [
+            BoundingBox(10 + i * 150, 20, 100 + i * 150, 200, 0.85)
+            for i in range(num_boxes)
+        ]
 
         with patch("cv2.VideoCapture") as mock_cap_cls:
             mock_cap = MagicMock()
@@ -342,9 +334,10 @@ class TestOneEventPerFrame:
             mock_cap.read.side_effect = read_side_effect
             mock_cap_cls.return_value = mock_cap
             loop._model = MagicMock()
-            loop._model.predict.return_value = [mock_result]
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
             with patch.object(loop, "_load_model"):
-                loop._run()
+                with patch("catguard.detection._postprocess", return_value=fake_boxes):
+                    loop._run()
 
     def test_one_box_emits_one_sound_played(self):
         callback = MagicMock()
@@ -415,6 +408,8 @@ class TestVerificationCallback:
     def test_pending_frame_set_after_sound_played(self):
         """After a SOUND_PLAYED event, _pending_frame must be set."""
         import numpy as _np
+        from catguard.detection import BoundingBox
+
         received = {}
 
         def cb(event):
@@ -433,22 +428,17 @@ class TestVerificationCallback:
             loop._stop_event.set()
             return False, None
 
-        fake_box = MagicMock()
-        fake_box.conf = [0.9]
-        fake_box.xyxy = [[5.0, 5.0, 50.0, 50.0]]
-
-        mock_result = MagicMock()
-        mock_result.boxes = [fake_box]
-
         with patch("cv2.VideoCapture") as mock_cap_cls:
             mock_cap = MagicMock()
             mock_cap.isOpened.return_value = True
             mock_cap.read.side_effect = read_side_effect
             mock_cap_cls.return_value = mock_cap
             loop._model = MagicMock()
-            loop._model.predict.return_value = [mock_result]
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
             with patch.object(loop, "_load_model"):
-                loop._run()
+                with patch("catguard.detection._postprocess",
+                           return_value=[BoundingBox(5, 5, 50, 50, 0.9)]):
+                    loop._run()
 
         # After SOUND_PLAYED, _pending_frame must have been set (then cleared by
         # the verification trigger only if cooldown elapsed again — here it won't
@@ -482,16 +472,13 @@ class TestVerificationCallback:
             loop._stop_event.set()
             return False, None
 
-        mock_result = MagicMock()
-        mock_result.boxes = None  # no cats at verification time
-
         with patch("cv2.VideoCapture") as mock_cap_cls:
             mock_cap = MagicMock()
             mock_cap.isOpened.return_value = True
             mock_cap.read.side_effect = read_side_effect
             mock_cap_cls.return_value = mock_cap
             loop._model = MagicMock()
-            loop._model.predict.return_value = [mock_result]
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
             with patch.object(loop, "_load_model"):
                 loop._run()
 
@@ -525,16 +512,13 @@ class TestVerificationCallback:
             loop._stop_event.set()
             return False, None
 
-        mock_result = MagicMock()
-        mock_result.boxes = None
-
         with patch("cv2.VideoCapture") as mock_cap_cls:
             mock_cap = MagicMock()
             mock_cap.isOpened.return_value = True
             mock_cap.read.side_effect = read_side_effect
             mock_cap_cls.return_value = mock_cap
             loop._model = MagicMock()
-            loop._model.predict.return_value = [mock_result]
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
             with patch.object(loop, "_load_model"):
                 loop._run()
 

@@ -32,23 +32,10 @@ def _blank_frame(h: int = 100, w: int = 120) -> np.ndarray:
     return np.zeros((h, w, 3), dtype=np.uint8)
 
 
-def _make_mock_box(x1, y1, x2, y2, cls_id=15, conf=0.9):
-    """Return a minimal mock mimicking a YOLO Boxes object entry."""
-    from unittest.mock import MagicMock
-    box = MagicMock()
-    box.xyxy = [[x1, y1, x2, y2]]
-    box.conf = [conf]
-    box.cls = [cls_id]
-    return box
-
-
-def _make_mock_result(boxes, names=None):
-    """Return a minimal mock mimicking a YOLO Result object."""
-    from unittest.mock import MagicMock
-    result = MagicMock()
-    result.boxes = boxes
-    result.names = names or {15: "cat"}
-    return result
+def _make_bbox(x1, y1, x2, y2, conf=0.9, label="cat"):
+    """Return a BoundingBox for use in draw_detections tests."""
+    from catguard.detection import BoundingBox
+    return BoundingBox(x1=x1, y1=y1, x2=x2, y2=y2, confidence=conf, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -147,22 +134,19 @@ class TestDrawDetections:
 
     def test_single_detection_annotates_frame(self):
         frame = _blank_frame(200, 200)
-        box = _make_mock_box(20, 20, 80, 80)
-        result_obj = _make_mock_result([box])
-        annotated = draw_detections(frame, [result_obj])
+        box = _make_bbox(20, 20, 80, 80)
+        annotated = draw_detections(frame, [box])
         assert np.any(annotated != frame), "Expected detections to draw on frame"
 
     def test_multiple_detections_both_annotated(self):
         frame = _blank_frame(300, 400)
-        box1 = _make_mock_box(10, 10, 60, 60)
-        box2 = _make_mock_box(200, 150, 280, 230)
-        result_obj = _make_mock_result([box1, box2])
-        annotated = draw_detections(frame, [result_obj])
+        box1 = _make_bbox(10, 10, 60, 60)
+        box2 = _make_bbox(200, 150, 280, 230)
+        annotated = draw_detections(frame, [box1, box2])
         # Both boxes should leave traces — just check total annotated pixels > 0
         assert np.any(annotated != 0)
 
     def test_result_with_none_boxes_handled_gracefully(self):
         frame = _blank_frame()
-        result_obj = _make_mock_result(None)
-        annotated = draw_detections(frame, [result_obj])
+        annotated = draw_detections(frame, None)
         np.testing.assert_array_equal(annotated, frame)
