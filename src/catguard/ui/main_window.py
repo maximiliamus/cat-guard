@@ -60,6 +60,7 @@ class MainWindow:
 
         self._photo_image = None   # holds reference to prevent GC
         self._canvas_image_id = None
+        self._last_canvas_size = (0, 0)  # (cw, ch) — skip geometry/config when unchanged
         self._closed = False         # set to True in _on_close; guards update_frame
         self._on_close_extra = None  # optional callback invoked just before destroy
         self._alert_label = None     # non-None while an alert sound is playing
@@ -102,17 +103,19 @@ class MainWindow:
         try:
             h, w = frame_bgr.shape[:2]
 
-            # Resize window and canvas to match the frame every update;
-            # clamp to screen dimensions in case of unusually large cameras.
-            # Account for the action panel height at the bottom.
+            # Resize window and canvas to match the frame on first call and
+            # whenever the camera resolution changes; skip the costly geometry
+            # and config calls when dimensions are unchanged.
             sw = self._window.winfo_screenwidth()
             sh = self._window.winfo_screenheight()
             cw = min(w, sw)
             ch = min(h, sh - ACTION_PANEL_HEIGHT)  # Leave room for action panel
-            total_h = ch + ACTION_PANEL_HEIGHT  # Include action panel in window height
-            self._window.geometry(f"{cw}x{total_h}")
-            self._canvas.config(width=cw, height=ch)
-            logger.debug("MainWindow geometry: %dx%d (frame=%dx%d, action_panel=%d).", cw, total_h, w, h, ACTION_PANEL_HEIGHT)
+            if (cw, ch) != self._last_canvas_size:
+                total_h = ch + ACTION_PANEL_HEIGHT  # Include action panel in window height
+                self._window.geometry(f"{cw}x{total_h}")
+                self._canvas.config(width=cw, height=ch)
+                self._last_canvas_size = (cw, ch)
+                logger.debug("MainWindow geometry: %dx%d (frame=%dx%d, action_panel=%d).", cw, total_h, w, h, ACTION_PANEL_HEIGHT)
 
             # Draw bounding-box overlays onto a copy of the frame
             annotated = draw_detections(frame_bgr, detections)

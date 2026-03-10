@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 CAT_CLASS_ID = 15
 MODEL_NAME = "yolo11n.onnx"
 _INPUT_SIZE = 640  # ONNX model input resolution
+_FRAME_INTERVAL = 0.2  # seconds between inference cycles (~5 fps); keeps CPU idle between frames
 
 
 class CameraError(Exception):
@@ -568,10 +569,10 @@ class DetectionLoop:
                             max_conf,
                         )
 
-                # Yield the CPU briefly between inferences so the process
-                # doesn't pin a core at 100 %.  Using stop_event.wait means
-                # the thread wakes up immediately when stop() is called.
-                if self._stop_event.wait(timeout=0.05):
+                # Yield the CPU between inferences so the process doesn't pin
+                # a core at 100 %.  Using stop_event.wait means the thread
+                # wakes up immediately when stop() is called.
+                if self._stop_event.wait(timeout=_FRAME_INTERVAL):
                     break
 
                 # Deliver frame + results to optional UI callback (MainWindow).

@@ -122,8 +122,8 @@ class TestUpdateFrame:
         # geometry should have been called with "640x520" (480 frame + 40px action panel)
         toplevel_inst.geometry.assert_called_with("640x520")
 
-    def test_sets_geometry_on_every_call(self, patched_tk):
-        """Window geometry is updated on every frame to fit the camera frame."""
+    def test_skips_geometry_on_same_size_frame(self, patched_tk):
+        """geometry() is not called again when the frame size is unchanged (perf guard)."""
         mw_mod, mock_tk, toplevel_inst, _ = patched_tk
         root = _make_root()
         win = mw_mod.MainWindow(root)
@@ -131,7 +131,7 @@ class TestUpdateFrame:
         win.update_frame(frame, [])
         toplevel_inst.geometry.reset_mock()
         win.update_frame(frame, [])
-        toplevel_inst.geometry.assert_called_with("640x520")  # 480 + 40px action panel
+        toplevel_inst.geometry.assert_not_called()
 
     def test_clamps_geometry_to_screen_size(self, patched_tk):
         """A frame larger than screen bounds should be clamped."""
