@@ -5,9 +5,30 @@ on:
     branches:
       - master
 
+concurrency:
+  group: build-${{ github.sha }}
+  cancel-in-progress: true
+
 jobs:
+  check-tag:
+    name: Check for release tag
+    runs-on: ubuntu-latest
+    outputs:
+      is_tagged: ${{ steps.tag_check.outputs.is_tagged }}
+    steps:
+      - name: Check if commit is tagged
+        id: tag_check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          COUNT=$(gh api "repos/${{ github.repository }}/git/refs/tags" \
+            --jq "[.[] | select(.object.sha == \"${{ github.sha }}\") | .ref] | length" 2>/dev/null || echo "0")
+          echo "is_tagged=$( [ "$COUNT" -gt 0 ] && echo true || echo false )" >> $GITHUB_OUTPUT
+
   test:
     name: Test (${{ matrix.os }})
+    needs: check-tag
+    if: needs.check-tag.outputs.is_tagged == 'false'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
