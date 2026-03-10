@@ -2,8 +2,6 @@ name: Build & Release
 
 on:
   push:
-    branches:
-      - master
     tags:
       - 'v*'
 
@@ -70,6 +68,11 @@ jobs:
             echo "ERROR: Tag version ($TAG_VERSION) does not match pyproject.toml version ($TOML_VERSION)"
             exit 1
           fi
+
+      - name: Export ONNX model
+        run: |
+          pip install ultralytics
+          python -c "from ultralytics import YOLO; YOLO('yolo11n.pt').export(format='onnx')"
 
       - name: Build with PyInstaller
         run: pyinstaller catguard.spec --clean --noconfirm
