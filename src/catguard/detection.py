@@ -14,7 +14,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
 # cv2 imported lazily inside functions so the module loads without opencv-python
 # installed (e.g. in CI environments where only pure-Python packages are available).
@@ -26,13 +26,20 @@ try:
 except ImportError:  # pragma: no cover
     np = None  # type: ignore[assignment]
 
+if TYPE_CHECKING:
+    from pathlib import Path
+    from numpy import ndarray as _NpArray
+
 logger = logging.getLogger(__name__)
 
 # YOLO COCO class index for 'cat'
 CAT_CLASS_ID = 15
 MODEL_NAME = "yolo11n.onnx"
+MODEL_DOWNLOAD_URL = (
+    "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.onnx"
+)
 _INPUT_SIZE = 640  # ONNX model input resolution
-_FRAME_INTERVAL = 0.2  # seconds between inference cycles (~5 fps); keeps CPU idle between frames
+_FRAME_INTERVAL_DEFAULT = 1 / 3  # fallback used only when settings.detection_fps is unavailable
 
 
 class CameraError(Exception):
@@ -68,7 +75,47 @@ class BoundingBox:
     label: str = "cat"
 
 
-def _preprocess_frame(frame: "np.ndarray", size: int) -> "np.ndarray":
+def _get_model_path(models_directory: Optional[str] = None) -> "Path":
+    """Return the local path to the ONNX model, downloading it on first use.
+
+    If *models_directory* is provided it overrides the default platform
+    user-data directory, allowing the user to configure a custom location.
+    """
+    from pathlib import Path
+
+    if models_directory:
+        model_dir = Path(models_directory)
+    else:
+        from platformdirs import user_data_dir
+        model_dir = Path(user_data_dir("CatGuard")) / "models"
+
+    model_path = model_dir / MODEL_NAME
+    if not model_path.exists():
+        _download_model(model_path)
+    return model_path
+
+
+def _download_model(dest: "Path") -> None:
+    """Download the ONNX model from MODEL_DOWNLOAD_URL to *dest*.
+
+    Uses an atomic write (temp file + rename) so a partial download never
+    leaves a corrupt model at the target path.
+    """
+    import urllib.request
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".tmp")
+    logger.info("Downloading ONNX model from %s …", MODEL_DOWNLOAD_URL)
+    try:
+        urllib.request.urlretrieve(MODEL_DOWNLOAD_URL, str(tmp))
+        tmp.replace(dest)
+        logger.info("Model saved to %s", dest)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _preprocess_frame(frame: _NpArray, size: int) -> _NpArray:
     """Letterbox a BGR frame to *size*×*size* and return a float32 (1,3,H,W) blob."""
     import cv2
 
@@ -91,7 +138,7 @@ def _preprocess_frame(frame: "np.ndarray", size: int) -> "np.ndarray":
 
 
 def _postprocess(
-    raw: "np.ndarray",
+    raw: _NpArray,
     conf_threshold: float,
     target_class: int,
     frame_shape: tuple,
@@ -150,7 +197,7 @@ class DetectionEvent:
     confidence: float
     action: DetectionAction
     sound_file: Optional[str] = None
-    frame_bgr: Optional["np.ndarray"] = None
+    frame_bgr: Optional[_NpArray] = None
     """Raw BGR camera frame captured at the moment of detection.
 
     Set only for ``SOUND_PLAYED`` events so the screenshot module can save it
@@ -174,8 +221,11 @@ class Camera:
     available: bool
 
 
-def list_cameras(max_index: int = 7) -> list[Camera]:
+def list_cameras(max_index: int = 7, active_indices: set[int] | None = None) -> list[Camera]:
     """Enumerate available cameras by trying VideoCapture indices 0..max_index.
+
+    *active_indices* — indices currently held open by the detection loop; they
+    are added to the result without probing to avoid disrupting the live feed.
 
     Returns a list of Camera objects for every index that successfully opens.
     """
@@ -191,10 +241,15 @@ def list_cameras(max_index: int = 7) -> list[Camera]:
         # Ignore failures — this is non-critical
         pass
 
+    skip = set(active_indices) if active_indices else set()
     cameras: list[Camera] = []
     use_dshow = platform.system() == "Windows"
 
     for i in range(max_index + 1):
+        if i in skip:
+            # Known-active: report as available without opening (avoids disrupting the live feed)
+            cameras.append(Camera(index=i, name=f"Camera {i}", available=True))
+            continue
         # On Windows, prefer the DirectShow backend to avoid FFmpeg probing messages
         try:
             if use_dshow:
@@ -238,14 +293,14 @@ class DetectionLoop:
         self._model_input_name: Optional[str] = None
         self._frame_callback: Optional[Callable] = None
         self._frame_callback_lock = threading.Lock()
-        self._pending_frame: Optional["np.ndarray"] = None
+        self._pending_frame: Optional[_NpArray] = None
         """Deep copy of detection frame held until verification fires.
 
         ``None`` when no verification is pending.  Acts as the sole
         pending-state sentinel (YAGNI: detection-time boxes and sound label
         are owned by EffectivenessTracker, not this loop).
         """
-        self._latest_frame: Optional["np.ndarray"] = None
+        self._latest_frame: Optional[_NpArray] = None
         """Latest raw BGR frame from the camera (for photo capture, etc).
         
         Updated on every frame iteration; used by ActionPanel to capture
@@ -279,7 +334,7 @@ class DetectionLoop:
         logger.info("DetectionLoop stopped.")
 
     def set_frame_callback(
-        self, cb: Optional[Callable[["np.ndarray", list], None]]
+        self, cb: Optional[Callable[[_NpArray, list], None]]
     ) -> None:
         """Set or clear the per-frame callback invoked after each inference cycle.
 
@@ -381,14 +436,14 @@ class DetectionLoop:
         with self._tracking_lock:
             return self._is_tracking
 
-    def get_latest_frame(self) -> Optional["np.ndarray"]:
+    def get_latest_frame(self) -> Optional[_NpArray]:
         """Return a copy of the latest captured frame, or None if unavailable.
 
         Thread-safe: Returns a copy to avoid race conditions with the
         detection loop updating the frame.
 
         Returns:
-            np.ndarray or None: Latest BGR frame, or None if no frame
+            _NpArray or None: Latest BGR frame, or None if no frame
             has been captured yet (e.g., during startup).
         """
         with self._frame_lock:
@@ -404,24 +459,22 @@ class DetectionLoop:
         """Lazy-load the ONNX model (runs once inside the daemon thread).
 
         Cached in memory across pause/resume cycles for efficiency.
-        In PyInstaller frozen builds, resolves the model path from sys._MEIPASS
-        so the bundled yolo11n.onnx is found regardless of the working directory.
+        The model is downloaded from MODEL_DOWNLOAD_URL on first use and
+        cached in the platform user-data directory.
         """
         if self._model is not None:
             return  # Model already loaded, reuse it
 
-        import sys
-        from pathlib import Path
-
         import onnxruntime as ort
 
-        if getattr(sys, "frozen", False):
-            model_path = Path(sys._MEIPASS) / MODEL_NAME
-        else:
-            model_path = Path(MODEL_NAME)
+        model_path = _get_model_path(self._settings.models_directory)
 
+        opts = ort.SessionOptions()
+        opts.intra_op_num_threads = 2
+        opts.add_session_config_entry("session.intra_op.allow_spinning", "0")
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_EXTENDED
         self._model = ort.InferenceSession(
-            str(model_path), providers=["CPUExecutionProvider"]
+            str(model_path), sess_options=opts, providers=["CPUExecutionProvider"]
         )
         self._model_input_name = self._model.get_inputs()[0].name
         logger.info("ONNX model loaded: %s", model_path)
@@ -572,7 +625,9 @@ class DetectionLoop:
                 # Yield the CPU between inferences so the process doesn't pin
                 # a core at 100 %.  Using stop_event.wait means the thread
                 # wakes up immediately when stop() is called.
-                if self._stop_event.wait(timeout=_FRAME_INTERVAL):
+                fps = getattr(self._settings, "detection_fps", None) or 3.0
+                interval = 1.0 / max(0.1, fps)
+                if self._stop_event.wait(timeout=interval):
                     break
 
                 # Deliver frame + results to optional UI callback (MainWindow).

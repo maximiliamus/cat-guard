@@ -38,6 +38,8 @@ class MainWindow:
         self._root = root
         self._tk = tk_mod
         self._window: tk_mod.Toplevel = tk_mod.Toplevel(root)
+        from catguard.tray import apply_app_icon
+        apply_app_icon(self._window)
         self._window.title("CatGuard — Live View")
         self._window.withdraw()  # hidden until show_or_focus() called
         self._window.resizable(False, False)

@@ -253,6 +253,104 @@ def _notify_state(root, is_tracking: bool) -> None:
             logger.debug("_notify_state: callback raised.", exc_info=True)
 
 
+def _set_window_taskbar_name(hwnd: int, name: str) -> None:
+    """Set AppUserModel display-name properties on a HWND via Win32 IPropertyStore.
+
+    Sets both PKEY_AppUserModel_RelaunchCommand (pid=2) and
+    PKEY_AppUserModel_RelaunchDisplayNameResource (pid=4).  Windows requires
+    both to be present together — setting only the display-name property is
+    silently ignored.  No-op if any step fails.
+    """
+    try:
+        import ctypes
+        import sys
+
+        class _GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_uint32), ("Data2", ctypes.c_uint16),
+                ("Data3", ctypes.c_uint16), ("Data4", ctypes.c_uint8 * 8),
+            ]
+
+        class _PROPERTYKEY(ctypes.Structure):
+            _fields_ = [("fmtid", _GUID), ("pid", ctypes.c_uint32)]
+
+        def _appusermodel_pkey(pid: int) -> _PROPERTYKEY:
+            # {9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3}
+            pk = _PROPERTYKEY()
+            pk.fmtid.Data1, pk.fmtid.Data2, pk.fmtid.Data3 = 0x9F4C2855, 0x9F79, 0x4B39
+            pk.fmtid.Data4[:] = [0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3]
+            pk.pid = pid
+            return pk
+
+        # IID_IPropertyStore {886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99}
+        riid = _GUID()
+        riid.Data1, riid.Data2, riid.Data3 = 0x886D8EEB, 0x8CF2, 0x4446
+        riid.Data4[:] = [0x8D, 0x02, 0xCD, 0xBA, 0x1D, 0xBD, 0xCF, 0x99]
+
+        pps = ctypes.c_void_p()
+        hr = ctypes.windll.shell32.SHGetPropertyStoreForWindow(
+            ctypes.c_size_t(hwnd), ctypes.byref(riid), ctypes.byref(pps)
+        )
+        if hr != 0 or not pps.value:
+            return
+
+        vt = ctypes.cast(
+            ctypes.cast(pps, ctypes.POINTER(ctypes.c_void_p))[0],
+            ctypes.POINTER(ctypes.c_void_p),
+        )
+        # IPropertyStore vtable: QI(0) AddRef(1) Release(2) GetCount(3)
+        #                        GetAt(4) GetValue(5) SetValue(6) Commit(7)
+        _SetValue = ctypes.WINFUNCTYPE(
+            ctypes.HRESULT, ctypes.c_void_p,
+            ctypes.POINTER(_PROPERTYKEY), ctypes.c_void_p,
+        )(vt[6])
+
+        def _set_string(pid: int, value: str) -> None:
+            pv = (ctypes.c_byte * 24)()
+            if ctypes.windll.propsys.InitPropVariantFromString(
+                ctypes.c_wchar_p(value), ctypes.byref(pv)
+            ) == 0:
+                _SetValue(pps, ctypes.byref(_appusermodel_pkey(pid)), ctypes.byref(pv))
+                ctypes.windll.ole32.PropVariantClear(ctypes.byref(pv))
+
+        # pid=2: RelaunchCommand — required partner; Windows ignores pid=4 without it
+        _set_string(2, sys.executable)
+        # pid=4: RelaunchDisplayNameResource — friendly name in taskbar context menu
+        _set_string(4, name)
+
+        _Commit = ctypes.WINFUNCTYPE(ctypes.HRESULT, ctypes.c_void_p)(vt[7])
+        _Commit(pps)
+
+        _Release = ctypes.WINFUNCTYPE(ctypes.ULONG, ctypes.c_void_p)(vt[2])
+        _Release(pps)
+    except Exception as exc:
+        logger.debug("Could not set taskbar display name: %s", exc)
+
+
+def apply_app_icon(win, *, is_root: bool = False) -> None:
+    """Set the application .ico on a tkinter window (no-op if icon not found).
+
+    Pass ``is_root=True`` when *win* is the ``tk.Tk()`` root — this uses the
+    ``default=`` argument which registers the icon as the application-class icon
+    so all Toplevel taskbar buttons inherit it automatically on Windows.
+    """
+    try:
+        ico = _ICON_ICO_PATH
+        if ico.exists():
+            if is_root:
+                win.iconbitmap(default=str(ico))
+            else:
+                win.iconbitmap(str(ico))
+    except Exception as exc:
+        logger.debug("Could not set window icon: %s", exc)
+
+    if platform.system() == "Windows":
+        try:
+            _set_window_taskbar_name(win.winfo_id(), "CatGuard")
+        except Exception as exc:
+            logger.debug("Could not set taskbar name: %s", exc)
+
+
 def _on_exit(icon: pystray.Icon, root, stop_event: threading.Event) -> None:
     """Stop the tray icon, signal the stop event, and destroy the tkinter root."""
     logger.info("Exit requested via tray menu.")

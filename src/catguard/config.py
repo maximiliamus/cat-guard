@@ -14,13 +14,18 @@ import re
 from pathlib import Path
 from typing import List
 
-from platformdirs import user_config_dir, user_pictures_dir
+from platformdirs import user_config_dir, user_data_dir, user_pictures_dir
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(user_config_dir("CatGuard"))
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
+
+
+def _default_models_directory() -> str:
+    """Return the default models directory path."""
+    return str(Path(user_data_dir("CatGuard")) / "models")
 
 
 def _default_tracking_directory() -> str:
@@ -67,6 +72,12 @@ class Settings(BaseModel):
         gt=0,
         description="Minimum seconds between consecutive alert sounds.",
     )
+    detection_fps: float = Field(
+        default=3.0,
+        gt=0,
+        le=30.0,
+        description="Camera frames analyzed per second (1–30). Higher values increase CPU usage.",
+    )
     sound_library_paths: List[str] = Field(
         default_factory=list,
         description="Absolute paths to user-uploaded MP3/WAV alert sounds.",
@@ -108,6 +119,10 @@ class Settings(BaseModel):
             "May precede start to span midnight (e.g. '22:00' → '06:00')."
         ),
     )
+    models_directory: str = Field(
+        default_factory=_default_models_directory,
+        description="Directory where YOLO model files are stored and downloaded.",
+    )
     photos_directory: str = Field(
         default_factory=_default_photos_directory,
         description="Directory where captured photos are saved (date-organised into YYYY-MM-DD subfolders). Defaults to system Pictures directory.",
@@ -137,6 +152,14 @@ class Settings(BaseModel):
         gt=0,
         description="Countdown duration (in seconds) for 'Take photo with delay' button.",
     )
+
+    @field_validator("models_directory")
+    @classmethod
+    def validate_models_directory(cls, path: str) -> str:
+        """Reject paths containing '..' for security (NFR-SEC-001)."""
+        if ".." in path:
+            raise ValueError(f"models_directory must not contain '..' (got {path!r})")
+        return path
 
     @field_validator("photos_directory")
     @classmethod

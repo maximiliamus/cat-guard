@@ -292,13 +292,13 @@ class TestActionPanelBasics:
         pytest.skip("ActionPanel implementation required")
 
 class TestCountdownButtonBasics:
-    """T013 — 'Take photo with delay' button creates countdown (US2)."""
-    
-    def test_countdown_button_exists(self):
-        """ActionPanel includes 'Take photo with delay' button."""
+    """T013 — Delay checkbox and spinbox next to Take photo button (US2)."""
+
+    def test_delay_checkbox_exists(self):
+        """ActionPanel includes a 'Delay (sec)' checkbox."""
         from catguard.ui.action_panel import ActionPanel
         from catguard.config import Settings
-        
+
         root = tk.Tk()
         try:
             settings = Settings()
@@ -308,23 +308,40 @@ class TestCountdownButtonBasics:
                 close_callback=MagicMock(),
                 settings=settings,
             )
-            
-            # Find buttons
-            buttons = []
-            self._find_buttons_recursive(panel._frame, buttons)
-            
-            button_labels = [b.cget('text') for b in buttons]
-            assert "Take photo with delay" in button_labels
-            
+
+            assert hasattr(panel, '_delay_checkbox')
+            assert panel._delay_checkbox.cget('text') == "Delay:"
+
             panel._frame.destroy()
         finally:
             root.destroy()
-    
-    def test_countdown_button_labeled_correctly_before_countdown(self):
-        """'Take photo with delay' button shows correct label before countdown start."""
+
+    def test_delay_spinbox_default_from_settings(self):
+        """Delay spinbox default value comes from settings.photo_countdown_seconds."""
         from catguard.ui.action_panel import ActionPanel
         from catguard.config import Settings
-        
+
+        root = tk.Tk()
+        try:
+            settings = Settings(photo_countdown_seconds=7)
+            panel = ActionPanel(
+                parent=root,
+                capture_callback=MagicMock(),
+                close_callback=MagicMock(),
+                settings=settings,
+            )
+
+            assert panel._delay_spinbox.get() == "7"
+
+            panel._frame.destroy()
+        finally:
+            root.destroy()
+
+    def test_spinbox_disabled_when_checkbox_unchecked(self):
+        """Spinbox is disabled when delay checkbox is unchecked."""
+        from catguard.ui.action_panel import ActionPanel
+        from catguard.config import Settings
+
         root = tk.Tk()
         try:
             settings = Settings()
@@ -334,15 +351,43 @@ class TestCountdownButtonBasics:
                 close_callback=MagicMock(),
                 settings=settings,
             )
-            
-            delay_btn = self._get_button_by_label(panel, "Take photo with delay")
-            assert delay_btn is not None
-            assert delay_btn.cget('text') == "Take photo with delay"
-            
+
+            assert not panel._delay_var.get()
+            assert str(panel._delay_spinbox.cget('state')) == 'disabled'
+
+            panel._delay_var.set(True)
+            panel._on_delay_toggle()
+            assert str(panel._delay_spinbox.cget('state')) == 'normal'
+
+            panel._delay_var.set(False)
+            panel._on_delay_toggle()
+            assert str(panel._delay_spinbox.cget('state')) == 'disabled'
+
             panel._frame.destroy()
         finally:
             root.destroy()
-    
+
+    def test_take_photo_button_label_before_countdown(self):
+        """Take photo button shows 'Take photo' label before any countdown."""
+        from catguard.ui.action_panel import ActionPanel
+        from catguard.config import Settings
+
+        root = tk.Tk()
+        try:
+            settings = Settings()
+            panel = ActionPanel(
+                parent=root,
+                capture_callback=MagicMock(),
+                close_callback=MagicMock(),
+                settings=settings,
+            )
+
+            assert panel._take_photo_btn.cget('text') == "Take photo"
+
+            panel._frame.destroy()
+        finally:
+            root.destroy()
+
     def _find_buttons_recursive(self, widget, buttons):
         """Helper to recursively find all buttons in widget hierarchy."""
         try:
@@ -355,7 +400,7 @@ class TestCountdownButtonBasics:
                 self._find_buttons_recursive(child, buttons)
         except:
             pass
-    
+
     def _get_button_by_label(self, widget, label):
         """Find a button by its text label."""
         # Handle ActionPanel objects by accessing internal _frame
@@ -428,10 +473,10 @@ class TestActionPanelLayout:
             root.destroy()
     
     def test_photo_buttons_left_aligned(self):
-        """Take photo buttons are in left frame."""
+        """Take photo button, delay checkbox, and spinbox are in left frame."""
         from catguard.ui.action_panel import ActionPanel
         from catguard.config import Settings
-        
+
         root = tk.Tk()
         try:
             settings = Settings()
@@ -441,15 +486,14 @@ class TestActionPanelLayout:
                 close_callback=MagicMock(),
                 settings=settings,
             )
-            
+
             take_photo_btn = self._get_button_by_label(panel, "Take photo")
             assert take_photo_btn is not None
             assert take_photo_btn.master == panel._left_frame
-            
-            delay_btn = self._get_button_by_label(panel, "Take photo with delay")
-            assert delay_btn is not None
-            assert delay_btn.master == panel._left_frame
-            
+
+            assert panel._delay_checkbox.master == panel._left_frame
+            assert panel._delay_spinbox.master == panel._left_frame
+
             panel._frame.destroy()
         finally:
             root.destroy()
@@ -514,8 +558,8 @@ class TestActionPanelLayout:
 class TestCountdownBehavior:
     """T014-T015 — Countdown timer logic (US2)."""
     
-    def test_countdown_button_suppresses_clicks_during_countdown(self):
-        """Clicks are ignored while countdown is active."""
+    def test_countdown_suppresses_clicks_during_countdown(self):
+        """Clicks on Take photo are ignored while countdown is active."""
         if os.environ.get("CI"):
             pytest.skip("Countdown timing tests skipped in CI")
 
@@ -533,15 +577,18 @@ class TestCountdownBehavior:
                 settings=settings,
             )
 
-            delay_btn = self._get_button_by_label(panel, "Take photo with delay")
+            # Enable delay checkbox
+            panel._delay_var.set(True)
+
+            take_photo_btn = panel._take_photo_btn
 
             # First click starts the countdown
-            delay_btn.invoke()
+            take_photo_btn.invoke()
             assert panel._countdown_active, "Countdown should be active after first click"
 
             # Second click during countdown should be suppressed (flag stays True,
             # no additional countdown initiated, capture not called yet)
-            delay_btn.invoke()
+            take_photo_btn.invoke()
             assert panel._countdown_active, "Countdown should still be active — second click suppressed"
             mock_capture.assert_not_called()
 

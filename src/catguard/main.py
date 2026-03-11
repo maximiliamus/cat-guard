@@ -65,7 +65,7 @@ def main() -> None:
     from catguard.detection import DetectionEvent, DetectionLoop
     from catguard.sleep_watcher import SleepWatcher
     from catguard.time_window import TimeWindowMonitor, _is_in_window
-    from catguard.tray import build_tray_icon, notify_error
+    from catguard.tray import apply_app_icon, build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
     # 1. Logging
@@ -96,7 +96,38 @@ def main() -> None:
     # ------------------------------------------------------------------
     # 4. tkinter root (created early so on_cat_detected can close over it)
     # ------------------------------------------------------------------
-    root = tk.Tk()
+    # Windows: when running from the Python interpreter, set an explicit
+    # AppUserModelID so Toplevel windows are grouped under CatGuard rather
+    # than Python.  When frozen (catguard.exe) Windows derives the grouping
+    # and display name from the exe itself (FileDescription = "CatGuard"),
+    # so we skip this call — otherwise Windows falls back to showing
+    # "catguard.exe" in the taskbar context-menu header.
+    if platform.system() == "Windows" and not getattr(sys, "frozen", False):
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CatGuard.Application.1")
+        except Exception:
+            pass
+
+    # Windows: clear any stale MUI cache entry for this exe so Explorer
+    # re-reads FileDescription ("CatGuard") rather than showing "catguard.exe".
+    if platform.system() == "Windows":
+        try:
+            import winreg
+            _mui_key = (
+                r"Software\Classes\Local Settings"
+                r"\Software\Microsoft\Windows\Shell\MuiCache"
+            )
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, _mui_key, 0, winreg.KEY_SET_VALUE
+            ) as _k:
+                winreg.DeleteValue(_k, sys.executable + ".FriendlyAppName")
+        except (FileNotFoundError, OSError):
+            pass  # key or value absent — nothing to clear
+
+    root = tk.Tk(className="CatGuard")
+    root.title("CatGuard")
+    apply_app_icon(root, is_root=True)
     root.withdraw()  # hide the root window; tray is the primary UI
     root._main_window_visible = False  # visibility flag read by save_screenshot
     root._recording_event = threading.Event()  # set while mic recording is active
@@ -230,7 +261,8 @@ def main() -> None:
     root.get_clean_frame = get_clean_frame
     root.minimize_to_tray = minimize_to_tray
     root.settings = settings
-    
+    root._default_sound_path = default_sound
+
     def on_shutdown(*_args) -> None:
         logger.info("Shutting down CatGuard…")
         time_window_monitor.stop()

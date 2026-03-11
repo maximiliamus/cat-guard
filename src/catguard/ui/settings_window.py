@@ -8,13 +8,12 @@ Provides:
 from __future__ import annotations
 
 import logging
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
 
-from catguard.config import Settings, _default_tracking_directory, _default_photos_directory
+from catguard.config import Settings, _default_models_directory, _default_photos_directory, _default_tracking_directory
 from catguard.ui.geometry import load_win_geometry, save_win_geometry
 from catguard.detection import Camera, list_cameras
 
@@ -31,9 +30,11 @@ class SettingsFormModel:
     camera_index: int = 0
     confidence_threshold: float = 0.25
     cooldown_seconds: float = 15.0
+    detection_fps: float = 3.0
     sound_library_paths: List[str] = field(default_factory=list)
     autostart: bool = False
     # Tracking fields (T013 / T023 / 008)
+    models_directory: str = field(default_factory=_default_models_directory)
     tracking_directory: str = field(default_factory=_default_tracking_directory)
     photos_directory: str = field(default_factory=_default_photos_directory)
     photo_countdown_seconds: int = 3
@@ -56,8 +57,10 @@ class SettingsFormModel:
             camera_index=s.camera_index,
             confidence_threshold=s.confidence_threshold,
             cooldown_seconds=s.cooldown_seconds,
+            detection_fps=s.detection_fps,
             sound_library_paths=list(s.sound_library_paths),
             autostart=s.autostart,
+            models_directory=s.models_directory,
             tracking_directory=s.tracking_directory,
             photos_directory=s.photos_directory,
             photo_countdown_seconds=s.photo_countdown_seconds,
@@ -78,8 +81,10 @@ class SettingsFormModel:
             camera_index=self.camera_index,
             confidence_threshold=self.confidence_threshold,
             cooldown_seconds=self.cooldown_seconds,
+            detection_fps=self.detection_fps,
             sound_library_paths=list(self.sound_library_paths),
             autostart=self.autostart,
+            models_directory=self.models_directory,
             tracking_directory=self.tracking_directory,
             photos_directory=self.photos_directory,
             photo_countdown_seconds=self.photo_countdown_seconds,
@@ -149,6 +154,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         return
 
     from catguard.autostart import disable_autostart, enable_autostart, is_autostart_enabled
+    from catguard.tray import apply_app_icon
     from catguard.recording import (
         Recorder,
         get_alerts_dir,
@@ -171,15 +177,15 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     model = SettingsFormModel.from_settings(settings)
 
     win = tk.Toplevel(root)
+    apply_app_icon(win)
     # mark window open on the root so subsequent clicks won't create duplicates
     root._settings_window_open = True
     root._settings_window = win
     win.title("CatGuard — Settings")
-    win.resizable(False, False)
+    win.resizable(True, True)
     win.grab_set()  # modal
 
-    # Set minimum size to ensure all controls fit
-    win.minsize(550, 700)
+    win.minsize(500, 360)
 
     # Restore saved position, or centre on root
     win.update_idletasks()
@@ -192,26 +198,51 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
 
     pad = {"padx": 8, "pady": 4}
 
-    # ---- Camera index -------------------------------------------------
-    tk.Label(win, text="Camera index:").grid(row=0, column=0, sticky="w", **pad)
-    # Initially show a disabled combobox while camera enumeration runs off the UI thread
-    cam_var = tk.StringVar(value="Loading…")
-    cam_combo = ttk.Combobox(win, textvariable=cam_var, values=["Loading…"], state="disabled", width=30)
-    cam_combo.grid(row=0, column=1, **pad)
+    # ---- Notebook -------------------------------------------------------
+    notebook = ttk.Notebook(win)
+    notebook.pack(fill="both", expand=True, padx=8, pady=(8, 0))
 
-    # ---- Detection sensitivity (inverted confidence threshold) ----------
-    # Slider direction: left = HIGH sensitivity (low threshold), right = LOW sensitivity (high threshold)
-    tk.Label(win, text="Detection sensitivity:").grid(row=1, column=0, sticky="w", **pad)
-    # Store threshold internally; display value is inverted: display = 1 - threshold
+    tab_detection = ttk.Frame(notebook, padding=8)
+    tab_models    = ttk.Frame(notebook, padding=8)
+    tab_sound     = ttk.Frame(notebook, padding=8)
+    tab_storage   = ttk.Frame(notebook, padding=8)
+    tab_schedule  = ttk.Frame(notebook, padding=8)
+    tab_general   = ttk.Frame(notebook, padding=8)
+
+    notebook.add(tab_general,   text="General")
+    notebook.add(tab_detection, text="Detection")
+    notebook.add(tab_models,    text="Models")
+    notebook.add(tab_sound,     text="Alerts")
+    notebook.add(tab_storage,   text="Storage")
+    notebook.add(tab_schedule,  text="Schedule")
+
+    # Allow column 1 to grow when the window is resized
+    tab_general.columnconfigure(1, weight=1)
+    tab_detection.columnconfigure(1, weight=1)
+    tab_models.columnconfigure(1, weight=1)
+    tab_sound.columnconfigure(1, weight=1)
+    tab_sound.rowconfigure(2, weight=1)   # listbox row grows vertically
+    tab_storage.columnconfigure(1, weight=1)
+    tab_schedule.columnconfigure(1, weight=1)
+
+    # ==== Detection tab ==================================================
+
+    # ---- Camera index ---------------------------------------------------
+    tk.Label(tab_detection, text="Camera index:").grid(row=0, column=0, sticky="e", **pad)
+    cam_var = tk.StringVar(value="Loading…")
+    cam_combo = ttk.Combobox(tab_detection, textvariable=cam_var, values=["Loading…"], state="disabled", width=30)
+    cam_combo.grid(row=0, column=1, sticky="ew", **pad)
+
+    # ---- Detection sensitivity ------------------------------------------
+    tk.Label(tab_detection, text="Detection sensitivity:").grid(row=1, column=0, sticky="e", **pad)
     conf_var = tk.DoubleVar(value=model.confidence_threshold)
-    sensitivity_frame = tk.Frame(win)
-    sensitivity_frame.grid(row=1, column=1, sticky="w", **pad)
-    threshold_label = tk.Label(sensitivity_frame, text=f"threshold={conf_var.get():.2f}")
+    sensitivity_frame = tk.Frame(tab_detection)
+    sensitivity_frame.grid(row=1, column=1, sticky="ew", **pad)
+    threshold_label = tk.Label(sensitivity_frame, text=f"{conf_var.get():.2f}")
 
     def _on_slider_change(val):
-        # Scale goes 0.0 (high sensitivity, low threshold) to 1.0 (low sensitivity, high threshold)
         conf_var.set(round(float(val), 2))
-        threshold_label.config(text=f"threshold={float(val):.2f}")
+        threshold_label.config(text=f"{float(val):.2f}")
 
     sens_scale = tk.Scale(
         sensitivity_frame,
@@ -219,26 +250,66 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         to=1.0,
         resolution=0.05,
         orient="horizontal",
+        showvalue=False,
         variable=conf_var,
         command=_on_slider_change,
         length=200,
-        label="◄ High sensitivity         Low sensitivity ►",
     )
     sens_scale.set(model.confidence_threshold)
     sens_scale.pack(side="left")
-    threshold_label.pack(side="left", padx=4)
+    threshold_label.pack(side="left", padx=(4, 0))
 
     # ---- Cooldown -------------------------------------------------------
-    tk.Label(win, text="Cooldown (seconds):").grid(row=2, column=0, sticky="w", **pad)
+    tk.Label(tab_detection, text="Cooldown (seconds):").grid(row=2, column=0, sticky="e", **pad)
     cool_var = tk.DoubleVar(value=model.cooldown_seconds)
-    tk.Spinbox(win, from_=1.0, to=300.0, increment=1.0, textvariable=cool_var, width=8, format="%.0f").grid(row=2, column=1, sticky="w", **pad)
+    tk.Spinbox(tab_detection, from_=1.0, to=300.0, increment=1.0, textvariable=cool_var, width=8, format="%.0f").grid(row=2, column=1, sticky="w", **pad)
 
-    # ---- Sound library paths ------------------------------------------
-    tk.Label(win, text="Sound library paths:").grid(row=3, column=0, sticky="nw", **pad)
-    path_listbox = tk.Listbox(win, height=4, width=40)
+    # ---- Detection FPS --------------------------------------------------
+    tk.Label(tab_detection, text="Detection FPS:").grid(row=3, column=0, sticky="e", **pad)
+    fps_var = tk.DoubleVar(value=model.detection_fps)
+    tk.Spinbox(tab_detection, from_=1.0, to=30.0, increment=1.0, textvariable=fps_var, width=8, format="%.0f").grid(row=3, column=1, sticky="w", **pad)
+
+    # ==== Models tab ======================================================
+
+    # ---- Models directory -----------------------------------------------
+    tk.Label(tab_models, text="Models directory:").grid(row=0, column=0, sticky="e", **pad)
+    models_folder_var = tk.StringVar(value=model.models_directory)
+    models_folder_frame = tk.Frame(tab_models)
+    models_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
+
+    def _browse_models_folder():
+        chosen = filedialog.askdirectory(
+            parent=win,
+            title="Select models directory",
+            initialdir=model.models_directory,
+        )
+        if chosen:
+            models_folder_var.set(chosen)
+
+    tk.Button(models_folder_frame, text="Browse\u2026", command=_browse_models_folder).pack(side="right", padx=(4, 0))
+    tk.Entry(models_folder_frame, textvariable=models_folder_var, state="readonly").pack(side="left", fill="x", expand=True)
+
+    # ==== Alerts tab ======================================================
+
+    alerts_dir = get_alerts_dir()
+
+    def _display_label(full_path: str) -> str:
+        """Return filename only if inside alerts_dir, else full path."""
+        p = Path(full_path)
+        try:
+            p.relative_to(alerts_dir)
+            return p.name
+        except ValueError:
+            return full_path
+
+    # ---- Alerts library --------------------------------------------------
+    tk.Label(tab_sound, text="Alerts library:").grid(row=2, column=0, sticky="ne", **pad)
+    path_listbox = tk.Listbox(tab_sound, height=5, width=40)
+    _paths_list: list[str] = []  # full paths, parallel to listbox entries
     for p in model.sound_library_paths:
-        path_listbox.insert(tk.END, p)
-    path_listbox.grid(row=3, column=1, **pad)
+        _paths_list.append(p)
+        path_listbox.insert(tk.END, _display_label(p))
+    path_listbox.grid(row=2, column=1, sticky="nsew", **pad)
 
     # (pinned_sound_var defined after combobox; _remove_path references it — forward ref resolved below)
     _pinned_var_holder: list = []  # mutable cell for forward reference
@@ -250,30 +321,31 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
             filetypes=[("Audio files", "*.mp3 *.wav"), ("All files", "*.*")],
         )
         for f in files:
-            # Avoid duplicates
-            existing = list(path_listbox.get(0, tk.END))
-            if f not in existing:
-                path_listbox.insert(tk.END, f)
+            if f not in _paths_list:
+                _paths_list.append(f)
+                path_listbox.insert(tk.END, _display_label(f))
         # Refresh combobox values when library changes
         _refresh_sound_combobox()
 
     def _remove_path():
         sel = path_listbox.curselection()
         if sel:
-            removed = path_listbox.get(sel[0])
-            path_listbox.delete(sel[0])
-            # T022: if removed path is the currently pinned sound, reset dropdown to "All"
+            idx = sel[0]
+            removed = _paths_list[idx]
+            path_listbox.delete(idx)
+            del _paths_list[idx]
+            # T022: if removed path is the currently pinned sound, reset dropdown to "All (in random order)"
             if _pinned_var_holder:
                 pinned_var = _pinned_var_holder[0]
-                if pinned_var.get() == removed:
-                    pinned_var.set("All")
+                if pinned_var.get() == _display_label(removed):
+                    pinned_var.set("All (in random order)")
             _refresh_sound_combobox()
 
     def _play_selected():
         sel = path_listbox.curselection()
         if not sel:
             return
-        path = path_listbox.get(sel[0])
+        path = _paths_list[sel[0]]
         from catguard.audio import _play_async
         _play_async(path)
 
@@ -286,7 +358,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         sel = path_listbox.curselection()
         if not sel:
             return
-        path = path_listbox.get(sel[0])
+        path = _paths_list[sel[0]]
         # Stop any active playback before showing dialog
         try:
             import pygame.mixer  # noqa: PLC0415
@@ -299,6 +371,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         # Custom resizable rename dialog — Entry expands with the window
         _result = [None]
         dlg = tk.Toplevel(win)
+        apply_app_icon(dlg)
         dlg.title("Rename Sound")
         dlg.resizable(True, False)
         dlg.grab_set()
@@ -351,7 +424,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         path_listbox.focus_set()
         path_listbox.selection_set(sel[0])
         path_listbox.see(sel[0])
-        _update_rename_btn_state()
+        _update_selection_btn_states()
 
         new_stem = _result[0]
         if new_stem is None:  # user cancelled
@@ -377,90 +450,17 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
             logger.error("_rename_path: failed to rename %s → %s: %s", path, new_path, exc)
             return
         # Update listbox entry in-place
+        new_path_str = str(new_path)
         path_listbox.delete(sel[0])
-        path_listbox.insert(sel[0], str(new_path))
+        path_listbox.insert(sel[0], _display_label(new_path_str))
+        _paths_list[sel[0]] = new_path_str
         path_listbox.selection_set(sel[0])
         path_listbox.see(sel[0])
         # Update pinned_var if this sound was the pinned selection
-        if _pinned_var_holder and _pinned_var_holder[0].get() == path:
-            _pinned_var_holder[0].set(str(new_path))
+        if _pinned_var_holder and _pinned_var_holder[0].get() == _display_label(path):
+            _pinned_var_holder[0].set(_display_label(new_path_str))
         _refresh_sound_combobox()
         logger.info("Sound file renamed: %s → %s", path, new_path)
-
-    btn_frame = tk.Frame(win)
-    btn_frame.grid(row=4, column=1, sticky="w", **pad)
-    tk.Button(btn_frame, text="Add…", command=_add_path).pack(side="left", padx=2)
-    tk.Button(btn_frame, text="Remove", command=_remove_path).pack(side="left", padx=2)
-    tk.Button(btn_frame, text="▶ Play", command=_play_selected).pack(side="left", padx=2)
-    rename_btn = tk.Button(btn_frame, text="Rename", command=_rename_path, state="disabled")
-    rename_btn.pack(side="left", padx=2)
-
-    def _update_rename_btn_state(*_):
-        rename_btn.config(
-            state="normal" if path_listbox.curselection() else "disabled"
-        )
-
-    path_listbox.bind("<<ListboxSelect>>", _update_rename_btn_state)
-
-    # ---- Sound Alerts section ------------------------------------------
-    tk.Label(win, text="Sound Alerts:", font=(None, 9, "bold")).grid(
-        row=5, column=0, sticky="nw", **pad
-    )
-
-    # T015: "Use Default Sound" checkbox
-    use_default_var = tk.BooleanVar(value=model.use_default_sound)
-    tk.Checkbutton(
-        win, text="Use Default Sound", variable=use_default_var
-    ).grid(row=5, column=1, sticky="w", **pad)
-
-    # T019: "Play Only This Sound" dropdown
-    tk.Label(win, text="Play Only This Sound:").grid(row=6, column=0, sticky="w", **pad)
-    _initial_pinned_label = model.pinned_sound if model.pinned_sound else "All"
-    _initial_values = ["All"] + list(path_listbox.get(0, tk.END))
-    if model.pinned_sound and model.pinned_sound not in _initial_values:
-        _initial_values.append(model.pinned_sound)
-    pinned_var = tk.StringVar(value=_initial_pinned_label)
-    _pinned_var_holder.append(pinned_var)  # resolve forward reference for _remove_path
-    sound_combo = ttk.Combobox(
-        win,
-        textvariable=pinned_var,
-        values=_initial_values,
-        state="readonly",
-        width=38,
-    )
-    sound_combo.grid(row=6, column=1, **pad)
-
-    def _refresh_sound_combobox():
-        """Rebuild combobox values from the current library list."""
-        libs = list(path_listbox.get(0, tk.END))
-        values = ["All"] + libs
-        sound_combo.config(values=values)
-        # If current selection is no longer valid, reset to All
-        if pinned_var.get() not in values:
-            pinned_var.set("All")
-
-    # T020: _update_dropdown_state — enables/disables combobox based on checkbox
-    def _update_dropdown_state(*_):
-        if use_default_var.get():
-            sound_combo.config(state="disabled")
-        else:
-            sound_combo.config(state="readonly")
-
-    use_default_var.trace_add("write", _update_dropdown_state)
-    _update_dropdown_state()  # set initial state
-
-    # T013: Alerts folder (read-only path + Browse button on same line)
-    tk.Label(win, text="Alerts folder:").grid(row=7, column=0, sticky="w", **pad)
-    alerts_dir = get_alerts_dir()
-    alerts_var = tk.StringVar(value=str(alerts_dir))
-    alerts_row_frame = tk.Frame(win)
-    alerts_row_frame.grid(row=7, column=1, sticky="w", **pad)
-    tk.Entry(alerts_row_frame, textvariable=alerts_var, width=28, state="readonly").pack(side="left")
-    tk.Button(
-        alerts_row_frame,
-        text="Browse\u2026",
-        command=lambda: open_alerts_folder(alerts_dir),
-    ).pack(side="left", padx=(4, 0))
 
     # T011: Record / Stop Recording button + state
     _recorder_holder: list = []  # mutable cell: [Recorder | None]
@@ -511,9 +511,113 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         else:
             _start_recording()
 
-    record_btn = tk.Button(win, text="Record", command=_on_record_btn, width=16)
-    record_btn.grid(row=8, column=1, sticky="w", **pad)
+    btn_frame = tk.Frame(tab_sound)
+    btn_frame.grid(row=3, column=1, sticky="ew", **pad)
+    btn_frame.columnconfigure(0, weight=1)
+    btn_frame.columnconfigure(1, weight=1)
+    btn_frame.columnconfigure(2, weight=1)
+
+    left_grp = tk.Frame(btn_frame)
+    left_grp.grid(row=0, column=0, sticky="w")
+    tk.Button(left_grp, text="Add…", command=_add_path).pack(side="left", padx=2)
+    rename_btn = tk.Button(left_grp, text="Rename", command=_rename_path, state="disabled")
+    rename_btn.pack(side="left", padx=2)
+
+    center_grp = tk.Frame(btn_frame)
+    center_grp.grid(row=0, column=1)
+    record_btn = tk.Button(center_grp, text="Record", command=_on_record_btn)
+    record_btn.pack(side="left", padx=2)
     _record_btn_holder.append(record_btn)
+    play_btn = tk.Button(center_grp, text="▶ Play", command=_play_selected, state="disabled")
+    play_btn.pack(side="left", padx=2)
+
+    right_grp = tk.Frame(btn_frame)
+    right_grp.grid(row=0, column=2, sticky="e")
+    remove_btn = tk.Button(right_grp, text="Remove", command=_remove_path, fg="red", state="disabled")
+    remove_btn.pack(side="left", padx=2)
+
+    def _update_selection_btn_states(*_):
+        state = "normal" if path_listbox.curselection() else "disabled"
+        rename_btn.config(state=state)
+        play_btn.config(state=state)
+        remove_btn.config(state=state)
+
+    def _on_listbox_click(event):
+        idx = path_listbox.nearest(event.y)
+        if idx in path_listbox.curselection():
+            path_listbox.selection_clear(idx)
+            _update_selection_btn_states()
+            return "break"
+
+    path_listbox.bind("<Button-1>", _on_listbox_click)
+    path_listbox.bind("<<ListboxSelect>>", _update_selection_btn_states)
+
+    # ---- Sound tab: alerts ----------------------------------------------
+    # T015: "Use default alert" checkbox
+    use_default_var = tk.BooleanVar(value=model.use_default_sound)
+    tk.Label(tab_sound, text="Use default alert:").grid(row=5, column=0, sticky="e", **pad)
+    _use_default_frame = tk.Frame(tab_sound)
+    _use_default_frame.grid(row=5, column=1, sticky="ew", **pad)
+    _use_default_cb = tk.Checkbutton(_use_default_frame, variable=use_default_var, takefocus=0)
+    _use_default_cb.pack(side="left")
+    _use_default_frame.bind("<Button-1>", lambda _e: use_default_var.set(not use_default_var.get()))
+
+    def _play_default_sound():
+        _default_sound = getattr(root, "_default_sound_path", None)
+        if _default_sound and Path(_default_sound).is_file():
+            try:
+                import pygame.mixer
+                pygame.mixer.stop()
+            except Exception:
+                pass
+            from catguard.audio import _play_async
+            _play_async(str(_default_sound))
+
+    tk.Button(_use_default_frame, text="\u25b6 Play", command=_play_default_sound).pack(side="left", padx=(6, 0))
+
+    # T019: "Play Only This Sound" dropdown
+    tk.Label(tab_sound, text="Play alert:").grid(row=4, column=0, sticky="e", **pad)
+    _initial_pinned_label = _display_label(model.pinned_sound) if model.pinned_sound else "All (in random order)"
+    _initial_values = ["All (in random order)"] + [_display_label(p) for p in _paths_list]
+    if model.pinned_sound and _initial_pinned_label not in _initial_values:
+        _initial_values.append(_initial_pinned_label)
+    pinned_var = tk.StringVar(value=_initial_pinned_label)
+    _pinned_var_holder.append(pinned_var)  # resolve forward reference for _remove_path
+    sound_combo = ttk.Combobox(
+        tab_sound,
+        textvariable=pinned_var,
+        values=_initial_values,
+        state="readonly",
+        width=38,
+    )
+    sound_combo.grid(row=4, column=1, sticky="ew", **pad)
+
+    def _refresh_sound_combobox():
+        """Rebuild combobox values from the current library list."""
+        values = ["All (in random order)"] + [_display_label(p) for p in _paths_list]
+        sound_combo.config(values=values)
+        # If current selection is no longer valid, reset to All
+        if pinned_var.get() not in values:
+            pinned_var.set("All (in random order)")
+
+    # T020: _update_dropdown_state — enables/disables combobox based on checkbox
+    def _update_dropdown_state(*_):
+        sound_combo.config(state="disabled" if use_default_var.get() else "readonly")
+
+    use_default_var.trace_add("write", _update_dropdown_state)
+    _update_dropdown_state()  # set initial state without playing
+
+    # T013: Alerts directory (read-only path + Browse button on same line)
+    tk.Label(tab_sound, text="Alerts directory:").grid(row=0, column=0, sticky="e", **pad)
+    alerts_var = tk.StringVar(value=str(alerts_dir))
+    alerts_row_frame = tk.Frame(tab_sound)
+    alerts_row_frame.grid(row=0, column=1, sticky="ew", **pad)
+    tk.Button(
+        alerts_row_frame,
+        text="Browse\u2026",
+        command=lambda: open_alerts_folder(alerts_dir),
+    ).pack(side="right", padx=(4, 0))
+    tk.Entry(alerts_row_frame, textvariable=alerts_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # T012: Name-entry prompt (shown after recording completes)
     def _show_name_prompt(data):
@@ -533,6 +637,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         record_btn.config(state="disabled")
 
         name_prompt = tk.Toplevel(win)
+        apply_app_icon(name_prompt)
         name_prompt.title("Name Your Recording")
         name_prompt.resizable(False, False)
         name_prompt.grab_set()
@@ -580,9 +685,9 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
             try:
                 saved = save_recording(data, raw_name, alerts_dir=alerts_dir)
                 # Add to library if not already present
-                existing_lib = list(path_listbox.get(0, tk.END))
-                if str(saved) not in existing_lib:
-                    path_listbox.insert(tk.END, str(saved))
+                if str(saved) not in _paths_list:
+                    _paths_list.append(str(saved))
+                    path_listbox.insert(tk.END, _display_label(str(saved)))
                 _refresh_sound_combobox()
                 logger.info("Recording saved and added to library: %s", saved)
             except OSError as exc:
@@ -610,21 +715,13 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         name_prompt.protocol("WM_DELETE_WINDOW", _do_cancel)
         name_prompt.wait_window()
 
-    # ---- Autostart -------------------------------------------------------
-    auto_var = tk.BooleanVar(value=model.autostart)
-    tk.Checkbutton(win, text="Start CatGuard at login", variable=auto_var).grid(row=9, column=1, sticky="w", **pad)
+    # ==== Storage tab ====================================================
 
-    # ---- Screenshots section (T014 / 008) -----
-    tk.Label(win, text="Tracking Directory:", font=(None, 9, "bold")).grid(
-        row=10, column=0, sticky="nw", **pad
-    )
-
-    # Tracking directory row
-    tk.Label(win, text="Directory:").grid(row=11, column=0, sticky="w", **pad)
+    # ---- Tracking directory ---------------------------------------------
+    tk.Label(tab_storage, text="Tracking directory:").grid(row=0, column=0, sticky="w", **pad)
     folder_var = tk.StringVar(value=model.tracking_directory)
-    ss_folder_frame = tk.Frame(win)
-    ss_folder_frame.grid(row=11, column=1, sticky="w", **pad)
-    tk.Entry(ss_folder_frame, textvariable=folder_var, width=28, state="readonly").pack(side="left")
+    ss_folder_frame = tk.Frame(tab_storage)
+    ss_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
 
     def _browse_folder():
         chosen = filedialog.askdirectory(
@@ -635,18 +732,14 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         if chosen:
             folder_var.set(chosen)
 
-    tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="left", padx=(4, 0))
+    tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="right", padx=(4, 0))
+    tk.Entry(ss_folder_frame, textvariable=folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
-    # ---- Photos Directory section ----
-    tk.Label(win, text="Photos Directory:", font=(None, 9, "bold")).grid(
-        row=12, column=0, sticky="nw", **pad
-    )
-
-    tk.Label(win, text="Directory:").grid(row=13, column=0, sticky="w", **pad)
+    # ---- Photos directory -----------------------------------------------
+    tk.Label(tab_storage, text="Photos directory:").grid(row=1, column=0, sticky="w", **pad)
     photos_folder_var = tk.StringVar(value=model.photos_directory)
-    photos_folder_frame = tk.Frame(win)
-    photos_folder_frame.grid(row=13, column=1, sticky="w", **pad)
-    tk.Entry(photos_folder_frame, textvariable=photos_folder_var, width=28, state="readonly").pack(side="left")
+    photos_folder_frame = tk.Frame(tab_storage)
+    photos_folder_frame.grid(row=1, column=1, sticky="ew", **pad)
 
     def _browse_photos_folder():
         chosen = filedialog.askdirectory(
@@ -657,29 +750,23 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         if chosen:
             photos_folder_var.set(chosen)
 
-    tk.Button(photos_folder_frame, text="Browse\u2026", command=_browse_photos_folder).pack(side="left", padx=(4, 0))
+    tk.Button(photos_folder_frame, text="Browse\u2026", command=_browse_photos_folder).pack(side="right", padx=(4, 0))
+    tk.Entry(photos_folder_frame, textvariable=photos_folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
-    # ---- Photo Countdown Delay section ----
-    tk.Label(win, text="Countdown (seconds):").grid(row=14, column=0, sticky="w", **pad)
-    photo_countdown_var = tk.IntVar(value=model.photo_countdown_seconds)
-    tk.Spinbox(win, from_=1, to=30, increment=1, textvariable=photo_countdown_var, width=8).grid(row=14, column=1, sticky="w", **pad)
+    # ==== Schedule tab ===================================================
 
-    # ---- Active Monitoring Window section (T008 / 007-misc-improvements) ----
-    tk.Label(win, text="Active Monitoring\nWindow:", font=(None, 9, "bold")).grid(
-        row=16, column=0, sticky="nw", **pad
-    )
     track_win_enabled_var = tk.BooleanVar(value=model.tracking_window_enabled)
     tk.Checkbutton(
-        win,
+        tab_schedule,
         text="Only monitor within a daily time window",
         variable=track_win_enabled_var,
-    ).grid(row=16, column=1, sticky="w", **pad)
+    ).grid(row=0, column=0, columnspan=2, sticky="w", **pad)
 
     track_win_start_var = tk.StringVar(value=model.tracking_window_start)
     track_win_end_var = tk.StringVar(value=model.tracking_window_end)
 
-    tw_track_frame = tk.Frame(win)
-    tw_track_frame.grid(row=17, column=1, sticky="w", **pad)
+    tw_track_frame = tk.Frame(tab_schedule)
+    tw_track_frame.grid(row=1, column=0, columnspan=2, sticky="w", **pad)
     tk.Label(tw_track_frame, text="From:").pack(side="left")
     track_start_spin = tk.Spinbox(
         tw_track_frame,
@@ -705,7 +792,23 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     track_win_enabled_var.trace_add("write", _update_track_tw_state)
     _update_track_tw_state()  # set initial state
 
-    # ---- Buttons ---------------------------------------------------------
+    # ==== General tab ====================================================
+
+    # ---- Photo countdown ------------------------------------------------
+    tk.Label(tab_general, text="Photo countdown (sec):").grid(row=0, column=0, sticky="e", **pad)
+    photo_countdown_var = tk.IntVar(value=model.photo_countdown_seconds)
+    photo_countdown_spin = tk.Spinbox(tab_general, from_=1, to=30, increment=1, textvariable=photo_countdown_var, width=8)
+    photo_countdown_spin.grid(row=0, column=1, sticky="w", **pad)
+
+    auto_var = tk.BooleanVar(value=model.autostart)
+    tk.Label(tab_general, text="Start CatGuard at login:").grid(row=1, column=0, sticky="e", **pad)
+    _auto_frame = tk.Frame(tab_general)
+    _auto_frame.grid(row=1, column=1, sticky="ew", **pad)
+    auto_check = tk.Checkbutton(_auto_frame, variable=auto_var, takefocus=0)
+    auto_check.pack(side="left")
+    _auto_frame.bind("<Button-1>", lambda _: auto_var.set(not auto_var.get()))
+
+    # ---- Buttons (outside notebook) -------------------------------------
     def _on_close():
         # Persist window geometry before destroying — save to both in-process
         # cell and on-disk file so position/size survives restarts.
@@ -740,17 +843,24 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.camera_index = cam_idx
         model.confidence_threshold = conf_var.get()
         model.cooldown_seconds = cool_var.get()
-        model.sound_library_paths = list(path_listbox.get(0, tk.END))
+        model.detection_fps = fps_var.get()
+        model.sound_library_paths = list(_paths_list)
         new_autostart = auto_var.get()
         model.autostart = new_autostart
+        model.models_directory = models_folder_var.get()
         model.tracking_directory = folder_var.get()
         model.photos_directory = photos_folder_var.get()
         model.photo_countdown_seconds = photo_countdown_var.get()
         # T016: persist audio playback settings
         model.use_default_sound = use_default_var.get()
-        # T021: persist pinned_sound ("All" → empty string)
-        selected = pinned_var.get()
-        model.pinned_sound = "" if selected == "All" else selected
+        # T021: persist pinned_sound ("All (in random order)" → empty string; display label → full path)
+        selected_label = pinned_var.get()
+        if selected_label == "All (in random order)":
+            model.pinned_sound = ""
+        else:
+            model.pinned_sound = next(
+                (p for p in _paths_list if _display_label(p) == selected_label), ""
+            )
         # T008: persist tracking window settings
         model.tracking_window_enabled = track_win_enabled_var.get()
         model.tracking_window_start = track_win_start_var.get()
@@ -769,7 +879,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         _on_close()
 
     btn_row = tk.Frame(win)
-    btn_row.grid(row=18, column=0, columnspan=2, pady=8)
+    btn_row.pack(anchor="e", padx=8, pady=8)
     tk.Button(btn_row, text="Save", command=_save, width=10).pack(side="left", padx=4)
     tk.Button(btn_row, text="Cancel", command=_cancel, width=10).pack(side="left", padx=4)
 
@@ -779,7 +889,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     # Enumerate cameras off the UI thread to avoid blocking the GUI
     def _load_cameras_bg():
         try:
-            cams = SettingsFormModel.get_cameras()
+            cams = list_cameras(active_indices={model.camera_index})
             cam_values_local = [f"{c.index}  {c.name}" for c in cams] or ["0  Default"]
         except Exception:
             logger.exception("Failed to enumerate cameras")
@@ -801,5 +911,9 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         root.after(0, _update)
 
     threading.Thread(target=_load_cameras_bg, name="SettingsCameraEnum", daemon=True).start()
+
+    win.lift()
+    win.focus_force()
+    photo_countdown_spin.focus_set()
 
     win.wait_window()

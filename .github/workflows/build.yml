@@ -73,12 +73,6 @@ jobs:
             exit 1
           fi
 
-      - name: Export ONNX model
-        run: |
-          pip install ultralytics
-          python -c "from ultralytics import YOLO; YOLO('yolo11n.pt').export(format='onnx')"
-          pip uninstall -y ultralytics torch torchvision torchaudio
-
       - name: Build with PyInstaller
         run: pyinstaller catguard.spec --clean --noconfirm
 

@@ -1,7 +1,7 @@
 """Pytest configuration and shared fixtures.
 
 This conftest installs lightweight sys.modules stubs for heavy optional
-packages (cv2, ultralytics, pygame) that either:
+packages (cv2, pygame) that either:
   - have no Python 3.14 wheel yet, or
   - require a GPU/display which is unavailable in CI.
 
@@ -33,7 +33,7 @@ def _install_stub(dotted_name: str) -> MagicMock:
 
 
 # Only stub packages that are genuinely absent — don't clobber real installs.
-for _pkg in ("cv2", "ultralytics", "pygame", "pygame.mixer", "pystray"):
+for _pkg in ("cv2", "pygame", "pygame.mixer", "pystray"):
     try:
         __import__(_pkg)
     except ModuleNotFoundError:

@@ -11,7 +11,7 @@ Pre-built executables are available on the [Releases](../../releases) page — n
    - **Windows**: `catguard\catguard.exe`
    - **macOS / Linux**: `./catguard/catguard`
 
-The YOLO model is bundled inside the zip — no internet access required.
+On first launch the app downloads the YOLO model (~6 MB) automatically and caches it locally — internet access is required only once.
 
 ## OS Security Warnings
 
@@ -89,7 +89,7 @@ pip install -e ".[dev]"
 | `pytest tests/unit/test_main_window.py` | A single test file |
 | `pytest tests/unit/test_main_window.py::TestUpdateFrame` | A single test class |
 
-> **Note:** Integration tests marked with `@pytest.mark.integration` require real package installs (cv2, onnxruntime) and `yolo11n.onnx` in the project root. Tests without this marker run in all modes.
+> **Note:** Integration tests marked with `@pytest.mark.integration` require real package installs (cv2, onnxruntime) and a network connection (the model is downloaded on first run). Tests without this marker run in all modes.
 
 
 ## Building the Executable
@@ -102,7 +102,6 @@ pip install -e ".[dev,build]"
 
 **Prerequisites**
 
-- `yolo11n.onnx` must be present in the project root (already committed).
 - **Linux**: install system libraries before building:
   ```bash
   sudo apt-get install -y python3-tk libportaudio2 libsndfile1

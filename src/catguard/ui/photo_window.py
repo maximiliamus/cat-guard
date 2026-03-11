@@ -67,6 +67,8 @@ class PhotoWindow:
         
         # Create Toplevel window
         self._window: tk.Toplevel = tk.Toplevel(master)
+        from catguard.tray import apply_app_icon
+        apply_app_icon(self._window)
         self._window.title(f"Photo — {photo.timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
         self._window.resizable(False, False)
         self._window.protocol("WM_DELETE_WINDOW", self._on_close)
