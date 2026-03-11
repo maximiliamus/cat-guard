@@ -6,10 +6,6 @@
 #
 import sys
 import tomllib
-from PyInstaller.utils.win32.versioninfo import (
-    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
-    StringStruct, VarFileInfo, VarStruct,
-)
 
 # Read version from pyproject.toml (single source of truth)
 with open('pyproject.toml', 'rb') as _f:
@@ -18,21 +14,29 @@ _version_str = _meta['project']['version']          # e.g. "0.5.0"
 _v = tuple(int(x) for x in _version_str.split('.'))
 _vt = _v + (0,) * (4 - len(_v))                    # pad to 4-tuple
 
-_version_info = VSVersionInfo(
-    ffi=FixedFileInfo(filevers=_vt, prodvers=_vt),
-    kids=[
-        StringFileInfo([StringTable('040904B0', [
-            StringStruct('CompanyName',      'CatGuard'),
-            StringStruct('FileDescription',  'CatGuard'),
-            StringStruct('FileVersion',      _version_str),
-            StringStruct('InternalName',     'CatGuard'),
-            StringStruct('OriginalFilename', 'catguard.exe'),
-            StringStruct('ProductName',      'CatGuard'),
-            StringStruct('ProductVersion',   _version_str),
-        ])]),
-        VarFileInfo([VarStruct('Translation', [0x0409, 1200])]),
-    ],
-)
+# Windows version info resource — only available/needed on Windows
+if sys.platform == 'win32':
+    from PyInstaller.utils.win32.versioninfo import (
+        VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable,
+        StringStruct, VarFileInfo, VarStruct,
+    )
+    _version_info = VSVersionInfo(
+        ffi=FixedFileInfo(filevers=_vt, prodvers=_vt),
+        kids=[
+            StringFileInfo([StringTable('040904B0', [
+                StringStruct('CompanyName',      'CatGuard'),
+                StringStruct('FileDescription',  'CatGuard'),
+                StringStruct('FileVersion',      _version_str),
+                StringStruct('InternalName',     'CatGuard'),
+                StringStruct('OriginalFilename', 'catguard.exe'),
+                StringStruct('ProductName',      'CatGuard'),
+                StringStruct('ProductVersion',   _version_str),
+            ])]),
+            VarFileInfo([VarStruct('Translation', [0x0409, 1200])]),
+        ],
+    )
+else:
+    _version_info = None
 
 # pywin32 ships win32timezone only on Windows
 _win32_imports = ['win32timezone'] if sys.platform == 'win32' else []
