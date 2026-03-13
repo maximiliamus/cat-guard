@@ -13,6 +13,10 @@ import signal
 import sys
 import threading
 from pathlib import Path
+from typing import Callable
+
+# helpers used by on-wake callback
+from catguard.time_window import _is_in_window
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,119 @@ def _monitor_playback_done(on_done: "Callable") -> None:
     threading.Thread(target=_worker, name="PlaybackMonitor", daemon=True).start()
 
 
+def _recreate_tray_icon(
+    root,
+    stop_event,
+    settings,
+    on_settings_saved,
+    detection_loop,
+    time_window_monitor,
+) -> None:
+    """Rebuild the tray icon after a sleep/resume cycle.
+
+    Windows may drop the icon when the system wakes; call this to stop
+    the old icon, rebuild a new one, and restart the associated thread.
+    """
+    old_icon = getattr(root, "_tray_icon", None)
+    if old_icon is not None:
+        try:
+            old_icon.stop()
+        except Exception:
+            logger.debug("_recreate_tray_icon: failed to stop old icon", exc_info=True)
+    new_icon = _build_and_prepare_tray_icon(
+        root,
+        stop_event,
+        settings,
+        on_settings_saved,
+        detection_loop,
+        time_window_monitor,
+    )
+    root._tray_icon = new_icon
+    # restart tray thread
+    if platform.system() == "Darwin":
+        new_icon.run_detached()
+    else:
+        tray_thread = threading.Thread(
+            target=new_icon.run, name="TrayThread", daemon=True
+        )
+        tray_thread.start()
+
+
+def _build_and_prepare_tray_icon(
+    root,
+    stop_event,
+    settings,
+    on_settings_saved,
+    detection_loop,
+    time_window_monitor,
+):
+    """Build a tray icon and sync its state to the current tracking status."""
+    from catguard.tray import build_tray_icon, update_tray_icon_color, update_tray_menu
+
+    new_icon = build_tray_icon(
+        root, stop_event, settings, on_settings_saved,
+        detection_loop, time_window_monitor,
+    )
+    is_tracking = detection_loop.is_tracking()
+    update_tray_icon_color(new_icon, is_tracking)
+    update_tray_menu(
+        new_icon, is_tracking, root, settings, on_settings_saved,
+        detection_loop, time_window_monitor,
+    )
+    return new_icon
+
+
+def _make_on_wake_callback(
+    root,
+    stop_event,
+    settings,
+    on_settings_saved,
+    detection_loop,
+    time_window_monitor,
+    was_tracking,
+    on_tracking_state_changed,
+) -> Callable[[], None]:
+    """Return a callback suitable for :class:`SleepWatcher`.
+
+    The returned function closes over the supplied arguments instead of
+    relying on names from ``main()`` so that tests can construct a fake
+    environment.
+    """
+
+    def on_wake() -> None:
+        logger.info("System wake detected (SleepWatcher).")
+        if not was_tracking[0]:
+            logger.info("on_wake: detection was paused before sleep — not restoring.")
+            return
+        # FR-007: evaluate time window before restoring
+        if settings.tracking_window_enabled:
+            from datetime import datetime
+
+            now = datetime.now().time()
+            if not _is_in_window(
+                now, settings.tracking_window_start, settings.tracking_window_end
+            ):
+                logger.info(
+                    "on_wake: current time is outside tracking window — not restoring camera."
+                )
+                return
+        logger.info("on_wake: restoring camera after sleep.")
+        try:
+            detection_loop.resume()
+            on_tracking_state_changed(True)
+            _recreate_tray_icon(
+                root,
+                stop_event,
+                settings,
+                on_settings_saved,
+                detection_loop,
+                time_window_monitor,
+            )
+        except Exception:
+            logger.exception("on_wake: failed to resume detection loop.")
+
+    return on_wake
+
 def main() -> None:
     """Main entry point. Initializes all subsystems and starts the event loop."""
     import tkinter as tk
@@ -64,7 +181,7 @@ def main() -> None:
     from catguard.config import load_settings, save_settings
     from catguard.detection import DetectionEvent, DetectionLoop
     from catguard.sleep_watcher import SleepWatcher
-    from catguard.time_window import TimeWindowMonitor, _is_in_window
+    from catguard.time_window import TimeWindowMonitor
     from catguard.tray import apply_app_icon, build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
@@ -172,7 +289,7 @@ def main() -> None:
 
     detection_loop = DetectionLoop(settings, on_cat_detected)
     detection_loop.set_verification_callback(tracker.on_verification)
-    
+
     # Set up camera error callback (T041)
     def on_camera_error(error_msg: str) -> None:
         """Handle camera errors by showing notification via tray."""
@@ -181,9 +298,9 @@ def main() -> None:
             notify_error(icon, f"Camera error: {error_msg}")
         else:
             logger.warning("Camera error (tray not ready): %s", error_msg)
-    
+
     detection_loop.set_error_callback(on_camera_error)
-    
+
     # Pre-warm camera in background before showing tray
     # This allows 20+ seconds of initialization while UI appears
     logger.info("Starting camera warm-up (this may take 20+ seconds)…")
@@ -191,7 +308,16 @@ def main() -> None:
     detection_loop.resume()
 
     # ------------------------------------------------------------------
-    # 5b. TimeWindowMonitor — auto-pause/resume based on time window (T009)
+    # 5b. Settings save callback (updates shared settings in-place — pull model)
+    # ------------------------------------------------------------------
+    def on_settings_saved(new_settings) -> None:
+        save_settings(new_settings)
+        for field_name in new_settings.model_fields:
+            setattr(settings, field_name, getattr(new_settings, field_name))
+        logger.info("Settings saved and propagated to detection loop.")
+
+    # ------------------------------------------------------------------
+    # 5c. TimeWindowMonitor — auto-pause/resume based on time window (T009)
     # ------------------------------------------------------------------
     _was_tracking = [True]  # reflects intentional (non-error) tracking state
 
@@ -214,30 +340,18 @@ def main() -> None:
     root._on_tracking_state_changed = on_tracking_state_changed
 
     # ------------------------------------------------------------------
-    # 5c. SleepWatcher — detect system wake and restore camera (T014)
+    # 5d. SleepWatcher — detect system wake and restore camera (T014)
     # ------------------------------------------------------------------
-    def on_wake() -> None:
-        """Called by SleepWatcher after detecting a system wake event."""
-        logger.info("System wake detected (SleepWatcher).")
-        if not _was_tracking[0]:
-            logger.info("on_wake: detection was paused before sleep — not restoring.")
-            return
-        # FR-007: evaluate time window before restoring
-        if settings.tracking_window_enabled:
-            from datetime import datetime
-            now = datetime.now().time()
-            if not _is_in_window(now, settings.tracking_window_start, settings.tracking_window_end):
-                logger.info(
-                    "on_wake: current time is outside tracking window — not restoring camera."
-                )
-                return
-        logger.info("on_wake: restoring camera after sleep.")
-        try:
-            detection_loop.resume()
-            on_tracking_state_changed(True)
-        except Exception:
-            logger.exception("on_wake: failed to resume detection loop.")
-
+    on_wake = _make_on_wake_callback(
+        root,
+        stop_event,
+        settings,
+        on_settings_saved,
+        detection_loop,
+        time_window_monitor,
+        _was_tracking,
+        on_tracking_state_changed,
+    )
     sleep_watcher = SleepWatcher(on_wake=on_wake)
 
     # ------------------------------------------------------------------
@@ -245,18 +359,18 @@ def main() -> None:
     # ------------------------------------------------------------------
     def get_clean_frame():
         """T011: Retrieve the latest raw frame without detection overlays.
-        
+
         Used by ActionPanel to capture clean photos for saving.
         Returns None if no frame is available yet.
         """
         return detection_loop.get_latest_frame()
-    
+
     def minimize_to_tray():
         """Close the main window and restore the tray icon."""
         root.withdraw()
         root._main_window_visible = False
         logger.info("Main window minimized to tray.")
-    
+
     # Attach these functions to root so they can be called from MainWindow
     root.get_clean_frame = get_clean_frame
     root.minimize_to_tray = minimize_to_tray
@@ -277,16 +391,7 @@ def main() -> None:
         signal.signal(signal.SIGTERM, on_shutdown)
 
     # ------------------------------------------------------------------
-    # 7. Settings save callback (updates shared settings in-place — pull model)
-    # ------------------------------------------------------------------
-    def on_settings_saved(new_settings) -> None:
-        save_settings(new_settings)
-        for field_name in new_settings.model_fields:
-            setattr(settings, field_name, getattr(new_settings, field_name))
-        logger.info("Settings saved and propagated to detection loop.")
-
-    # ------------------------------------------------------------------
-    # 8. Tray + tkinter main loop
+    # 7. Tray + tkinter main loop
     # ------------------------------------------------------------------
     tray_icon = build_tray_icon(
         root, stop_event, settings, on_settings_saved, detection_loop, time_window_monitor

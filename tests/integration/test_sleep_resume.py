@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from datetime import time as dtime
 from unittest.mock import MagicMock, patch, call
+import threading
 
 import pytest
 
 from catguard.config import Settings
 from catguard.detection import DetectionLoop
 from catguard.sleep_watcher import SleepWatcher
+from catguard import main as main_module
 
 
 def _make_on_wake_callback(detection_loop, time_window_monitor=None, now_override=None):
@@ -147,3 +149,43 @@ class TestSleepWakeRestoreIntegration:
             watcher._run()
 
         on_wake.assert_called_once()
+
+
+    def test_on_wake_helper_recreates_tray(self):
+        """Using the real main helper ensures tray icon is rebuilt after wake."""
+        # set up a fake environment similar to unit tests but with real objects
+        root = MagicMock()
+        root._tray_icon = MagicMock()
+        old_icon = root._tray_icon
+        stop_event = threading.Event()
+        settings = Settings()
+        settings.tracking_window_enabled = False
+        on_settings_saved = MagicMock()
+        loop = DetectionLoop(Settings(), MagicMock())
+        loop.is_tracking = MagicMock(return_value=True)
+        loop.resume = MagicMock()
+        time_window_monitor = MagicMock()
+        was_tracking = [True]
+        on_track = MagicMock()
+
+        with patch("catguard.main._build_and_prepare_tray_icon") as mock_build, \
+             patch("threading.Thread") as mock_thread:
+            new_icon = MagicMock()
+            mock_build.return_value = new_icon
+            callback = main_module._make_on_wake_callback(
+                root,
+                stop_event,
+                settings,
+                on_settings_saved,
+                loop,
+                time_window_monitor,
+                was_tracking,
+                on_track,
+            )
+            callback()
+
+        # verify tray was replaced and tracking callback invoked
+        old_icon.stop.assert_called_once()
+        assert root._tray_icon is new_icon
+        mock_thread.return_value.start.assert_called_once()
+        on_track.assert_called_once_with(True)
