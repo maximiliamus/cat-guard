@@ -323,17 +323,17 @@ class TestMenuStructure:
 
         with patch("catguard.tray.pystray") as mock_pystray:
             menu_items = []
-            
+
             def capture_menu(*items):
                 menu_items.extend(items)
                 return items
-            
+
             mock_pystray.Menu = capture_menu
             mock_pystray.Menu.SEPARATOR = "SEPARATOR"
-            
+
             def capture_item(label, *args, **kwargs):
                 return label
-            
+
             mock_pystray.MenuItem = capture_item
             mock_pystray.Icon.return_value = MagicMock()
 
@@ -341,4 +341,82 @@ class TestMenuStructure:
 
             # Should have "Continue" in menu items
             assert any("Continue" in str(item) for item in menu_items)
+
+
+# ---------------------------------------------------------------------------
+# T006: "Logs" menu item (011-log-viewer-search, US1)
+# ---------------------------------------------------------------------------
+
+def _capture_tray_items(root=None, detection_loop=None, fn=None):
+    """Helper: build tray icon and capture all menu item labels."""
+    import threading as _threading
+
+    if root is None:
+        root = MagicMock()
+    if detection_loop is None:
+        detection_loop = MagicMock()
+        detection_loop.is_tracking.return_value = True
+    stop_event = _threading.Event()
+    settings = Settings()
+    on_save = MagicMock()
+
+    captured_items = []
+
+    with patch("catguard.tray.pystray") as mock_pystray:
+        mock_pystray.Icon.return_value = MagicMock()
+
+        def capture_menu(*items):
+            captured_items.extend(items)
+            return MagicMock()
+
+        mock_pystray.Menu = capture_menu
+        mock_pystray.Menu.SEPARATOR = "SEPARATOR"
+        mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
+
+        if fn is None:
+            build_tray_icon(root, stop_event, settings, on_save, detection_loop)
+        else:
+            fn(root, stop_event, settings, on_save, detection_loop)
+
+    return captured_items
+
+
+class TestLogsMenuItem:
+    """T006 — 'Logs' MenuItem must appear in both build_tray_icon and update_tray_menu."""
+
+    def test_build_tray_icon_includes_logs_item(self):
+        items = _capture_tray_items()
+        assert any("Logs" in str(item) for item in items), (
+            f"'Logs' not found in menu items: {items}"
+        )
+
+    def test_update_tray_menu_includes_logs_item(self):
+        from catguard.tray import update_tray_menu
+
+        root = MagicMock()
+        detection_loop = MagicMock()
+        detection_loop.is_tracking.return_value = True
+        settings = Settings()
+        on_save = MagicMock()
+        captured_items = []
+
+        with patch("catguard.tray.pystray") as mock_pystray:
+            mock_icon = MagicMock()
+
+            def capture_menu(*items):
+                captured_items.extend(items)
+                return MagicMock()
+
+            mock_pystray.Menu = capture_menu
+            mock_pystray.Menu.SEPARATOR = "SEPARATOR"
+            mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
+
+            update_tray_menu(
+                mock_icon, True, root, settings, on_save,
+                detection_loop, None,
+            )
+
+        assert any("Logs" in str(item) for item in captured_items), (
+            f"'Logs' not found in update_tray_menu items: {captured_items}"
+        )
 

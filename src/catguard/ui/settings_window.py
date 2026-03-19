@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
 
-from catguard.config import Settings, _default_models_directory, _default_photos_directory, _default_tracking_directory
+from catguard.config import Settings, _default_logs_directory, _default_models_directory, _default_photos_directory, _default_tracking_directory
 from catguard.ui.geometry import load_win_geometry, save_win_geometry
 from catguard.detection import Camera, list_cameras
 
@@ -45,6 +45,11 @@ class SettingsFormModel:
     tracking_window_enabled: bool = False
     tracking_window_start: str = "08:00"
     tracking_window_end: str = "18:00"
+    # Log management fields (011-log-viewer-search)
+    logs_directory: str = field(default_factory=_default_logs_directory)
+    max_log_entries: int = 2048
+    log_trim_batch_size: int = 205
+    log_auto_refresh_interval: int = 5
 
     # ------------------------------------------------------------------
     # Factory
@@ -69,6 +74,10 @@ class SettingsFormModel:
             tracking_window_enabled=s.tracking_window_enabled,
             tracking_window_start=s.tracking_window_start,
             tracking_window_end=s.tracking_window_end,
+            logs_directory=s.logs_directory,
+            max_log_entries=s.max_log_entries,
+            log_trim_batch_size=s.log_trim_batch_size,
+            log_auto_refresh_interval=s.log_auto_refresh_interval,
         )
 
     # ------------------------------------------------------------------
@@ -93,6 +102,10 @@ class SettingsFormModel:
             tracking_window_enabled=self.tracking_window_enabled,
             tracking_window_start=self.tracking_window_start,
             tracking_window_end=self.tracking_window_end,
+            logs_directory=self.logs_directory,
+            max_log_entries=self.max_log_entries,
+            log_trim_batch_size=self.log_trim_batch_size,
+            log_auto_refresh_interval=self.log_auto_refresh_interval,
         )
 
     # ------------------------------------------------------------------
@@ -155,6 +168,23 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
 
     from catguard.autostart import disable_autostart, enable_autostart, is_autostart_enabled
     from catguard.tray import apply_app_icon
+
+    def _open_dir(path: str) -> None:
+        import os
+        import subprocess
+        import platform as _platform
+        p = path.strip()
+        if not p:
+            return
+        try:
+            if _platform.system() == "Windows":
+                os.startfile(p)
+            elif _platform.system() == "Darwin":
+                subprocess.run(["open", p])
+            else:
+                subprocess.run(["xdg-open", p])
+        except Exception as exc:
+            logger.warning("Could not open directory %r: %s", p, exc)
     from catguard.recording import (
         Recorder,
         get_alerts_dir,
@@ -208,6 +238,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tab_storage   = ttk.Frame(notebook, padding=8)
     tab_schedule  = ttk.Frame(notebook, padding=8)
     tab_general   = ttk.Frame(notebook, padding=8)
+    tab_logs      = ttk.Frame(notebook, padding=8)
 
     notebook.add(tab_general,   text="General")
     notebook.add(tab_detection, text="Detection")
@@ -215,6 +246,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     notebook.add(tab_sound,     text="Alerts")
     notebook.add(tab_storage,   text="Storage")
     notebook.add(tab_schedule,  text="Schedule")
+    notebook.add(tab_logs,      text="Logs")
 
     # Allow column 1 to grow when the window is resized
     tab_general.columnconfigure(1, weight=1)
@@ -224,6 +256,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tab_sound.rowconfigure(2, weight=1)   # listbox row grows vertically
     tab_storage.columnconfigure(1, weight=1)
     tab_schedule.columnconfigure(1, weight=1)
+    tab_logs.columnconfigure(1, weight=1)
 
     # ==== Detection tab ==================================================
 
@@ -286,7 +319,8 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         if chosen:
             models_folder_var.set(chosen)
 
-    tk.Button(models_folder_frame, text="Browse\u2026", command=_browse_models_folder).pack(side="right", padx=(4, 0))
+    tk.Button(models_folder_frame, text="Open", command=lambda: _open_dir(models_folder_var.get())).pack(side="right", padx=(2, 0))
+    tk.Button(models_folder_frame, text="Browse\u2026", command=_browse_models_folder).pack(side="right", padx=(4, 2))
     tk.Entry(models_folder_frame, textvariable=models_folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # ==== Alerts tab ======================================================
@@ -614,9 +648,20 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     alerts_row_frame.grid(row=0, column=1, sticky="ew", **pad)
     tk.Button(
         alerts_row_frame,
-        text="Browse\u2026",
-        command=lambda: open_alerts_folder(alerts_dir),
-    ).pack(side="right", padx=(4, 0))
+        text="Open",
+        command=lambda: _open_dir(alerts_var.get()),
+    ).pack(side="right", padx=(2, 0))
+
+    def _browse_alerts_dir():
+        chosen = filedialog.askdirectory(
+            parent=win,
+            title="Select alerts directory",
+            initialdir=alerts_var.get(),
+        )
+        if chosen:
+            alerts_var.set(chosen)
+
+    tk.Button(alerts_row_frame, text="Browse\u2026", command=_browse_alerts_dir).pack(side="right", padx=(4, 2))
     tk.Entry(alerts_row_frame, textvariable=alerts_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # T012: Name-entry prompt (shown after recording completes)
@@ -732,7 +777,8 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         if chosen:
             folder_var.set(chosen)
 
-    tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="right", padx=(4, 0))
+    tk.Button(ss_folder_frame, text="Open", command=lambda: _open_dir(folder_var.get())).pack(side="right", padx=(2, 0))
+    tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="right", padx=(4, 2))
     tk.Entry(ss_folder_frame, textvariable=folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # ---- Photos directory -----------------------------------------------
@@ -750,7 +796,8 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         if chosen:
             photos_folder_var.set(chosen)
 
-    tk.Button(photos_folder_frame, text="Browse\u2026", command=_browse_photos_folder).pack(side="right", padx=(4, 0))
+    tk.Button(photos_folder_frame, text="Open", command=lambda: _open_dir(photos_folder_var.get())).pack(side="right", padx=(2, 0))
+    tk.Button(photos_folder_frame, text="Browse\u2026", command=_browse_photos_folder).pack(side="right", padx=(4, 2))
     tk.Entry(photos_folder_frame, textvariable=photos_folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # ==== Schedule tab ===================================================
@@ -833,6 +880,39 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
             except Exception:
                 pass
 
+    # ==== Logs tab =======================================================
+
+    logs_dir_var = tk.StringVar(value=model.logs_directory)
+    max_entries_var = tk.IntVar(value=model.max_log_entries)
+    batch_size_var = tk.IntVar(value=model.log_trim_batch_size)
+    auto_refresh_interval_var = tk.IntVar(value=model.log_auto_refresh_interval)
+
+    tk.Label(tab_logs, text="Logs directory:").grid(row=0, column=0, sticky="w", **pad)
+    logs_dir_frame = tk.Frame(tab_logs)
+    logs_dir_frame.grid(row=0, column=1, sticky="ew", **pad)
+
+    def _browse_logs_dir():
+        chosen = filedialog.askdirectory(
+            parent=win,
+            title="Select logs directory",
+            initialdir=model.logs_directory,
+        )
+        if chosen:
+            logs_dir_var.set(chosen)
+
+    tk.Button(logs_dir_frame, text="Open", command=lambda: _open_dir(logs_dir_var.get())).pack(side="right", padx=(2, 0))
+    tk.Button(logs_dir_frame, text="Browse\u2026", command=_browse_logs_dir).pack(side="right", padx=(4, 2))
+    tk.Entry(logs_dir_frame, textvariable=logs_dir_var, state="readonly").pack(side="left", fill="x", expand=True)
+
+    tk.Label(tab_logs, text="Max log entries:").grid(row=1, column=0, sticky="w", **pad)
+    tk.Spinbox(tab_logs, from_=2048, to=1_000_000, textvariable=max_entries_var, width=10).grid(row=1, column=1, sticky="w", **pad)
+
+    tk.Label(tab_logs, text="Trim batch size:").grid(row=2, column=0, sticky="w", **pad)
+    tk.Spinbox(tab_logs, from_=205, to=100_000, textvariable=batch_size_var, width=10).grid(row=2, column=1, sticky="w", **pad)
+
+    tk.Label(tab_logs, text="Auto-refresh interval (s):").grid(row=3, column=0, sticky="w", **pad)
+    tk.Spinbox(tab_logs, from_=1, to=3600, textvariable=auto_refresh_interval_var, width=10).grid(row=3, column=1, sticky="w", **pad)
+
     def _save():
         try:
             # Extract camera index from combo value "0  Camera 0"
@@ -865,6 +945,39 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.tracking_window_enabled = track_win_enabled_var.get()
         model.tracking_window_start = track_win_start_var.get()
         model.tracking_window_end = track_win_end_var.get()
+
+        # T021: persist log settings — validate before applying
+        try:
+            new_max_entries = int(max_entries_var.get())
+        except (ValueError, tk.TclError):
+            new_max_entries = 0
+        if new_max_entries < 2048:
+            messagebox.showerror(
+                "Invalid value", "Max log entries must be at least 2048.", parent=win
+            )
+            return
+        try:
+            new_batch_size = int(batch_size_var.get())
+        except (ValueError, tk.TclError):
+            new_batch_size = 0
+        if new_batch_size < 205:
+            messagebox.showerror(
+                "Invalid value", "Trim batch size must be at least 205.", parent=win
+            )
+            return
+        try:
+            new_auto_refresh_interval = int(auto_refresh_interval_var.get())
+        except (ValueError, tk.TclError):
+            new_auto_refresh_interval = 0
+        if new_auto_refresh_interval < 1:
+            messagebox.showerror(
+                "Invalid value", "Auto-refresh interval must be at least 1 second.", parent=win
+            )
+            return
+        model.logs_directory = logs_dir_var.get()
+        model.max_log_entries = new_max_entries
+        model.log_trim_batch_size = new_batch_size
+        model.log_auto_refresh_interval = new_auto_refresh_interval
 
         # Apply autostart change if it differs from current
         if new_autostart and not is_autostart_enabled():

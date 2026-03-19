@@ -118,12 +118,17 @@ def build_tray_icon(
 
     on_open_clicked = _on_open_clicked_factory(root, detection_loop)
 
+    def on_logs_clicked(icon, item):
+        from catguard.ui.log_viewer import open_log_viewer
+        root.after(0, lambda: open_log_viewer(root, settings))
+
     # Initial pause label (will show "Pause" after app starts tracking)
     pause_label = "Pause" if detection_loop.is_tracking() else "Continue"
 
     # Reorganized menu with separators (T032, T033, T010)
     menu = pystray.Menu(
         pystray.MenuItem("Open", on_open_clicked),
+        pystray.MenuItem("Logs", on_logs_clicked),
         pystray.MenuItem("Settings\u2026", on_settings_clicked),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(pause_label, on_pause_continue_clicked),
@@ -206,12 +211,17 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
 
         on_open_clicked = _on_open_clicked_factory(root, detection_loop)
 
+        def on_logs_clicked(icon, item):
+            from catguard.ui.log_viewer import open_log_viewer
+            root.after(0, lambda: open_log_viewer(root, settings))
+
         # Menu item label based on state
         pause_label = "Pause" if is_tracking else "Continue"
 
         # Reorganized menu with separators (T032, T033)
         menu = pystray.Menu(
             pystray.MenuItem("Open", on_open_clicked),
+            pystray.MenuItem("Logs", on_logs_clicked),
             pystray.MenuItem("Settings\u2026", on_settings_clicked),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(pause_label, on_pause_continue_clicked),
