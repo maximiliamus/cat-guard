@@ -375,3 +375,92 @@ class TestTrackingWindowBackwardCompatibility:
         assert loaded.tracking_window_enabled is True
         assert loaded.tracking_window_start == "07:00"
         assert loaded.tracking_window_end == "20:30"
+
+
+# ---------------------------------------------------------------------------
+# T003 (011-log-viewer-search): Log settings fields
+# ---------------------------------------------------------------------------
+
+class TestLogsSettingsDefaults:
+    """T003 — new log fields have correct defaults (TDD RED before T004)."""
+
+    def test_logs_directory_default_contains_catguard(self):
+        s = Settings()
+        assert "CatGuard" in s.logs_directory
+
+    def test_logs_directory_default_ends_with_logs(self):
+        s = Settings()
+        assert s.logs_directory.endswith("logs") or s.logs_directory.endswith("logs/") or s.logs_directory.endswith("logs\\")
+
+    def test_max_log_entries_default(self):
+        s = Settings()
+        assert s.max_log_entries == 2048
+
+    def test_log_trim_batch_size_default(self):
+        s = Settings()
+        assert s.log_trim_batch_size == 205
+
+
+class TestLogsSettingsValidation:
+    """T003 — validators enforce minimums and reject path traversal."""
+
+    def test_logs_directory_rejects_traversal(self):
+        with pytest.raises(Exception):
+            Settings(logs_directory="../etc/evil")
+
+    def test_logs_directory_rejects_traversal_embedded(self):
+        with pytest.raises(Exception):
+            Settings(logs_directory="/safe/../etc/evil")
+
+    def test_max_log_entries_minimum_accepted(self):
+        s = Settings(max_log_entries=2048)
+        assert s.max_log_entries == 2048
+
+    def test_max_log_entries_below_minimum_rejected(self):
+        with pytest.raises(Exception):
+            Settings(max_log_entries=2047)
+
+    def test_max_log_entries_above_minimum_accepted(self):
+        s = Settings(max_log_entries=5000)
+        assert s.max_log_entries == 5000
+
+    def test_log_trim_batch_size_minimum_accepted(self):
+        s = Settings(log_trim_batch_size=205)
+        assert s.log_trim_batch_size == 205
+
+    def test_log_trim_batch_size_below_minimum_rejected(self):
+        with pytest.raises(Exception):
+            Settings(log_trim_batch_size=204)
+
+    def test_log_trim_batch_size_above_minimum_accepted(self):
+        s = Settings(log_trim_batch_size=500)
+        assert s.log_trim_batch_size == 500
+
+
+class TestLogsSettingsMigration:
+    """T003 — legacy settings.json without log fields loads with defaults."""
+
+    def test_load_settings_migrates_missing_log_fields(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        legacy_data = {"camera_index": 1, "cooldown_seconds": 10.0}
+        config_file.write_text(json.dumps(legacy_data), encoding="utf-8")
+        with patch("catguard.config._config_file", return_value=config_file):
+            loaded = load_settings()
+        assert loaded.camera_index == 1
+        assert "CatGuard" in loaded.logs_directory
+        assert loaded.max_log_entries == 2048
+        assert loaded.log_trim_batch_size == 205
+
+    def test_logs_settings_round_trip(self, tmp_path):
+        config_file = tmp_path / "settings.json"
+        original = Settings(
+            logs_directory="/tmp/my_logs",
+            max_log_entries=4096,
+            log_trim_batch_size=410,
+        )
+        with patch("catguard.config._config_file", return_value=config_file):
+            save_settings(original)
+            loaded = load_settings()
+        assert loaded.logs_directory == "/tmp/my_logs"
+        assert loaded.max_log_entries == 4096
+        assert loaded.log_trim_batch_size == 410

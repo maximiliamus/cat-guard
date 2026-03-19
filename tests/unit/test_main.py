@@ -9,8 +9,10 @@ callback can be exercised without launching a real GUI thread.
 """
 from __future__ import annotations
 
+import logging
 import platform
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -226,3 +228,91 @@ def test_on_wake_detached_on_darwin(mock_thread):
     assert new_icon.run_detached.called
     mock_thread.assert_not_called()
     on_track_cb.assert_called_once_with(True)
+
+
+# ---------------------------------------------------------------------------
+# T016: handler reconfiguration tests (011-log-viewer-search, US3)
+# ---------------------------------------------------------------------------
+
+class TestHandlerReconfiguration:
+    """T016 — on_settings_saved reconfigures BatchTrimFileHandler on dir change."""
+
+    def test_on_settings_saved_reconfigures_handler_on_dir_change(self, tmp_path):
+        """When logs_directory changes, the old handler is removed and a new one added."""
+        import logging as _logging
+        import catguard.main as m
+        from catguard.log_manager import BatchTrimFileHandler
+        from catguard.config import Settings
+
+        old_dir = tmp_path / "old_logs"
+        new_dir = tmp_path / "new_logs"
+        old_dir.mkdir()
+        new_dir.mkdir()
+
+        old_settings = Settings(logs_directory=str(old_dir))
+        new_settings = Settings(logs_directory=str(new_dir))
+
+        root_logger = _logging.getLogger()
+        old_handler = BatchTrimFileHandler(
+            str(old_dir / "catguard.log"),
+            max_entries=2048,
+            batch_size=205,
+        )
+        original_handlers = list(root_logger.handlers)
+
+        try:
+            m._file_handler = old_handler
+            root_logger.addHandler(old_handler)
+
+            m._reconfigure_file_handler(new_settings)
+
+            assert old_handler not in root_logger.handlers
+            assert m._file_handler is not None
+            assert m._file_handler is not old_handler
+            assert str(new_dir) in str(Path(m._file_handler.baseFilename))
+        finally:
+            if m._file_handler and m._file_handler in root_logger.handlers:
+                root_logger.removeHandler(m._file_handler)
+                m._file_handler.close()
+            if old_handler in root_logger.handlers:
+                root_logger.removeHandler(old_handler)
+                old_handler.close()
+            m._file_handler = None
+            for h in list(root_logger.handlers):
+                if h not in original_handlers:
+                    root_logger.removeHandler(h)
+
+    def test_on_settings_saved_no_handler_change_when_dir_unchanged(self, tmp_path):
+        """When logs_directory is unchanged, _file_handler is NOT replaced."""
+        import logging as _logging
+        import catguard.main as m
+        from catguard.log_manager import BatchTrimFileHandler
+        from catguard.config import Settings
+
+        log_dir = tmp_path / "logs"
+        log_dir.mkdir()
+        settings = Settings(logs_directory=str(log_dir))
+
+        old_handler = BatchTrimFileHandler(
+            str(log_dir / "catguard.log"),
+            max_entries=2048,
+            batch_size=205,
+        )
+        root_logger = _logging.getLogger()
+        original_handlers = list(root_logger.handlers)
+
+        try:
+            m._file_handler = old_handler
+            root_logger.addHandler(old_handler)
+
+            m._reconfigure_file_handler(settings)
+
+            assert m._file_handler is old_handler
+        finally:
+            if old_handler in root_logger.handlers:
+                root_logger.removeHandler(old_handler)
+            old_handler.close()
+            m._file_handler = None
+            for h in list(root_logger.handlers):
+                if h not in original_handlers:
+                    root_logger.removeHandler(h)

@@ -20,6 +20,9 @@ from catguard.time_window import _is_in_window
 
 logger = logging.getLogger(__name__)
 
+# Module-level file handler — replaced on logs_directory change (T020)
+_file_handler: "BatchTrimFileHandler | None" = None
+
 
 def _get_resource_dir() -> Path:
     """Return the root resource directory for both dev and packaged environments.
@@ -185,23 +188,27 @@ def main() -> None:
     from catguard.tray import apply_app_icon, build_tray_icon, notify_error
 
     # ------------------------------------------------------------------
-    # 1. Logging
+    # 1. Settings (loaded first so logging uses configured paths)
     # ------------------------------------------------------------------
-    _configure_logging()
+    settings = load_settings()
 
     # ------------------------------------------------------------------
-    # 1b. Locale (T020 / FR-021: read OS locale for date/time formatting)
+    # 1b. Logging (uses settings.logs_directory from config)
+    # ------------------------------------------------------------------
+    _configure_logging(
+        logs_dir=Path(settings.logs_directory),
+        max_entries=settings.max_log_entries,
+        batch_size=settings.log_trim_batch_size,
+    )
+
+    # ------------------------------------------------------------------
+    # 1c. Locale (T020 / FR-021: read OS locale for date/time formatting)
     # ------------------------------------------------------------------
     try:
         locale.setlocale(locale.LC_TIME, "")
         logger.info("Locale set to system default: %s", locale.getlocale(locale.LC_TIME))
     except locale.Error as exc:
         logger.warning("Could not set system locale for LC_TIME: %s", exc)
-
-    # ------------------------------------------------------------------
-    # 2. Settings (shared mutable object — all modules hold a reference)
-    # ------------------------------------------------------------------
-    settings = load_settings()
 
     # ------------------------------------------------------------------
     # 3. Audio
@@ -312,6 +319,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     def on_settings_saved(new_settings) -> None:
         save_settings(new_settings)
+        _reconfigure_file_handler(new_settings)
         for field_name in new_settings.model_fields:
             setattr(settings, field_name, getattr(new_settings, field_name))
         logger.info("Settings saved and propagated to detection loop.")
@@ -418,33 +426,47 @@ def main() -> None:
     # Do not call on_shutdown() here; shutdown is handled by signal handler.
 
 
-def _configure_logging() -> None:
-    """Configure rotating file + console logging.
+def _configure_logging(
+    logs_dir: Path | None = None,
+    max_entries: int = 2048,
+    batch_size: int = 205,
+) -> None:
+    """Configure BatchTrimFileHandler + console logging.
 
     Log level is INFO by default; DEBUG if --debug is in sys.argv.
-    Log files are written to the platform user log directory.
+    Log files are written to *logs_dir* (defaults to the platform user log directory).
+    Creates the directory if it does not exist.
     """
-    import logging.handlers
-    from platformdirs import user_data_dir
+    global _file_handler
+    from catguard.log_manager import BatchTrimFileHandler
 
-    log_dir = Path(user_data_dir("CatGuard")) / "logs"
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_file = log_dir / "catguard.log"
+    if logs_dir is None:
+        from platformdirs import user_data_dir
+        logs_dir = Path(user_data_dir("CatGuard")) / "logs"
+
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_file = logs_dir / "catguard.log"
 
     root_logger = logging.getLogger()
-    if root_logger.handlers:
-        return  # already configured (e.g., in tests)
+    # Only skip if our file handler is already attached.
+    # Don't bail on StreamHandlers added by third-party libs (e.g. ultralytics).
+    if _file_handler is not None and _file_handler in root_logger.handlers:
+        return
 
     level = logging.DEBUG if "--debug" in sys.argv else logging.INFO
     root_logger.setLevel(level)
 
     fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 
-    fh = logging.handlers.RotatingFileHandler(
-        log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    fh = BatchTrimFileHandler(
+        str(log_file),
+        max_entries=max_entries,
+        batch_size=batch_size,
+        encoding="utf-8",
     )
     fh.setFormatter(fmt)
     root_logger.addHandler(fh)
+    _file_handler = fh
 
     ch = logging.StreamHandler()
     ch.setFormatter(logging.Formatter("[%(levelname)s] %(name)s: %(message)s"))
@@ -453,3 +475,39 @@ def _configure_logging() -> None:
     logger.info("Logging configured. Log file: %s", log_file)
     if level == logging.DEBUG:
         logger.debug("Debug logging enabled.")
+
+
+def _reconfigure_file_handler(settings) -> None:
+    """Swap the file handler if *settings.logs_directory* has changed (T020)."""
+    global _file_handler
+    from catguard.log_manager import BatchTrimFileHandler
+
+    if _file_handler is None:
+        return
+
+    new_dir = Path(settings.logs_directory)
+    current_dir = Path(_file_handler.baseFilename).parent
+
+    if new_dir.resolve() == current_dir.resolve():
+        return  # unchanged — nothing to do
+
+    new_dir.mkdir(parents=True, exist_ok=True)
+    root_logger = logging.getLogger()
+
+    # Remove and close old handler
+    root_logger.removeHandler(_file_handler)
+    _file_handler.close()
+
+    # Create new handler at the new location
+    new_log_file = new_dir / "catguard.log"
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    new_fh = BatchTrimFileHandler(
+        str(new_log_file),
+        max_entries=settings.max_log_entries,
+        batch_size=settings.log_trim_batch_size,
+        encoding="utf-8",
+    )
+    new_fh.setFormatter(fmt)
+    root_logger.addHandler(new_fh)
+    _file_handler = new_fh
+    logger.info("Log file handler reconfigured to: %s", new_log_file)

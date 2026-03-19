@@ -28,6 +28,11 @@ def _default_models_directory() -> str:
     return str(Path(user_data_dir("CatGuard")) / "models")
 
 
+def _default_logs_directory() -> str:
+    """Return the default logs directory path."""
+    return str(Path(user_data_dir("CatGuard")) / "logs")
+
+
 def _default_tracking_directory() -> str:
     """Return the default tracking directory path."""
     return str(Path(user_pictures_dir()) / "CatGuard" / "tracking")
@@ -152,6 +157,25 @@ class Settings(BaseModel):
         gt=0,
         description="Countdown duration (in seconds) for 'Take photo with delay' button.",
     )
+    logs_directory: str = Field(
+        default_factory=_default_logs_directory,
+        description="Directory where catguard.log is written and read.",
+    )
+    max_log_entries: int = Field(
+        default=2048,
+        ge=2048,
+        description="Maximum retained log entries; trim removes oldest when exceeded.",
+    )
+    log_trim_batch_size: int = Field(
+        default=205,
+        ge=205,
+        description="Number of writes between trim checks (~10% of default max_log_entries).",
+    )
+    log_auto_refresh_interval: int = Field(
+        default=5,
+        ge=1,
+        description="Log Viewer auto-refresh interval in seconds.",
+    )
 
     @field_validator("models_directory")
     @classmethod
@@ -175,6 +199,14 @@ class Settings(BaseModel):
         """Reject paths containing '..' for security (NFR-SEC-001)."""
         if ".." in path:
             raise ValueError(f"tracking_directory must not contain '..' (got {path!r})")
+        return path
+
+    @field_validator("logs_directory")
+    @classmethod
+    def validate_logs_directory(cls, path: str) -> str:
+        """Reject paths containing '..' for security."""
+        if ".." in path:
+            raise ValueError(f"logs_directory must not contain '..' (got {path!r})")
         return path
 
     @field_validator("pinned_sound")
