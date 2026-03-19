@@ -91,6 +91,7 @@ You **MUST** consider the user input before proceeding (if not empty).
    - Generate unique checklist filename:
      - Use short, descriptive name based on domain (e.g., `ux.md`, `api.md`, `security.md`)
      - Format: `[domain].md`
+     - Do NOT append qualifiers or postfixes (e.g., `plan-review.md` ❌ → `plan.md` ✅)
      - If file exists, append to existing file
    - Number items sequentially starting from CHK001
    - Each `/speckit.checklist` run creates a NEW file (never overwrites existing checklists)
