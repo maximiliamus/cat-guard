@@ -144,6 +144,21 @@ class MainWindow:
         except Exception:
             logger.exception("Error updating MainWindow frame.")
 
+    def clear_frame(self) -> None:
+        """Wipe any stale last frame from the canvas, leaving it black.
+
+        Called when Live View is opened while tracking is paused so the user
+        sees a blank window instead of a frozen last frame.
+        """
+        if self._canvas_image_id is not None:
+            self._canvas.delete(self._canvas_image_id)
+            self._canvas_image_id = None
+        self._photo_image = None
+
+    def set_capture_enabled(self, enabled: bool) -> None:
+        """Enable or disable the photo-capture controls in the action panel."""
+        self._action_panel.set_capture_enabled(enabled)
+
     def set_alert_label(self, label) -> None:
         """Set or clear the alert-sound label shown in the live-view top bar.
 

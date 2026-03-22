@@ -104,6 +104,7 @@ def annotate_frame(
     boxes: "list[BoundingBox]",
     sound_label: str,
     outcome: Optional[str],
+    outcome_message: Optional[str] = None,
 ) -> "np.ndarray":
     """Apply all three annotation layers to a *copy* of the input frame.
 
@@ -124,6 +125,13 @@ def annotate_frame(
         Text for the top-left corner (already normalised by build_sound_label).
     outcome:
         ``"deterred"``, ``"remained"``, or ``None`` (unknown / not yet determined).
+        Determines the **colour** of the outcome strip.  When ``None``, no strip
+        is drawn regardless of *outcome_message*.
+    outcome_message:
+        Optional custom text for the outcome strip.  When provided and *outcome*
+        is ``"deterred"`` or ``"remained"``, this string replaces the hardcoded
+        default strip text.  Useful for session-timed labels such as
+        ``"Cat remained after alert: 30s"``.
 
     Returns
     -------
@@ -142,9 +150,11 @@ def annotate_frame(
 
     # --- Layer 3: Outcome overlay bottom strip (T018) ----------------------
     if outcome == "deterred":
-        _draw_outcome_strip(out, SUCCESS_BG, "Cat disappeared after alert")
+        text = outcome_message if outcome_message is not None else "Cat disappeared after alert"
+        _draw_outcome_strip(out, SUCCESS_BG, text)
     elif outcome == "remained":
-        _draw_outcome_strip(out, FAILURE_BG, "Cat remained after alert")
+        text = outcome_message if outcome_message is not None else "Cat remained after alert"
+        _draw_outcome_strip(out, FAILURE_BG, text)
     else:
         # outcome=None: no strip drawn; warn so it shows up in logs (T024)
         logger.warning(
@@ -326,21 +336,27 @@ def _save_annotated_async(
     settings: "Settings",
     is_window_open: Callable[[], bool],
     on_error: Callable[[str], None],
+    filepath: Optional[Path] = None,
 ) -> None:
     """Fire-and-forget daemon thread: annotate and save *frame* to disk.
 
     Mirrors the _play_async pattern in audio.py.  All exceptions are caught,
     logged, and forwarded to *on_error* — they never propagate to the caller
     (NFR-002).  The thread is daemonised so it does not block app exit.
+
+    When *filepath* is provided it is forwarded unchanged to ``save_screenshot``,
+    which bypasses both the window-open and time-window suppression checks and
+    writes to the caller-supplied path directly.
     """
     def _worker() -> None:
         try:
             from catguard.screenshots import save_screenshot
             logger.info(
-                "_save_annotated_async: dispatching save (is_window_open=%s)",
+                "_save_annotated_async: dispatching save (is_window_open=%s, filepath=%s)",
                 is_window_open(),
+                filepath,
             )
-            save_screenshot(frame, settings, is_window_open, on_error)
+            save_screenshot(frame, settings, is_window_open, on_error, filepath=filepath)
             logger.info("_save_annotated_async: save completed.")
         except Exception as exc:
             msg = f"Annotated screenshot save failed: {exc}"
@@ -401,6 +417,10 @@ class EffectivenessTracker:
         self._pending_boxes: "list[BoundingBox]" = []
         self._pending_sound: Optional[str] = None
 
+        # Session tracking state (FR-010, Plan Change 2)
+        self._session_start: Optional[_dt] = None
+        self._cycle_count: int = 0
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -418,15 +438,35 @@ class EffectivenessTracker:
     ) -> None:
         """Store a deep copy of the detection frame for later annotation.
 
-        FR-005a: if already pending, the new event is silently ignored.
-        Called from main.py on ``SOUND_PLAYED`` events.
+        Three-state logic (FR-005a, FR-010, Plan Change 2):
+        (a) Already pending → silently ignore (mid-cycle guard).
+        (b) No active session → start new session (set _session_start, _cycle_count=1).
+        (c) Session open, between cycles → increment _cycle_count.
+        Common step: store pending frame, boxes, sound.
         """
+        # State (a): already pending — ignore until verification clears it
         if self._is_pending:
             logger.debug(
                 "EffectivenessTracker.on_detection: already pending — ignoring "
                 "(FR-005a)."
             )
             return
+
+        if self._session_start is None:
+            # State (b): no active session — start a new one
+            self._session_start = _dt.now()
+            self._cycle_count = 1
+            logger.info(
+                "EffectivenessTracker.on_detection: new session started at %s.",
+                self._session_start,
+            )
+        else:
+            # State (c): session open, between cycles — advance cycle counter
+            self._cycle_count += 1
+            logger.debug(
+                "EffectivenessTracker.on_detection: session cycle %d.",
+                self._cycle_count,
+            )
 
         self._pending_frame = frame.copy()
         self._pending_boxes = list(boxes)
@@ -446,56 +486,114 @@ class EffectivenessTracker:
     ) -> None:
         """Annotate and async-save the pending frame using the verification result.
 
+        Multi-cycle session logic (FR-010, Plan Change 2):
+        1. Guard — no-op if _pending_frame is None or _session_start is None.
+        2. Capture locals (frame, boxes, sound, session_start, cycle_count).
+        3. Clear pending state (_pending_frame, _pending_boxes, _pending_sound).
+        4. Compute elapsed_s = int(cycle_count * cooldown_seconds).
+        5. Build timed outcome message.
+        6. Build session filepath via build_session_filepath.
+        7. Annotate frame with outcome_message.
+        8. Dispatch _save_annotated_async with explicit filepath.
+        9. If has_cat=False: close session (_session_start=None, _cycle_count=0).
+
         Called from DetectionLoop daemon thread at cooldown expiry.
-        If not pending, this is a no-op (defensive guard).
         """
-        if not self._is_pending:
+        # Step 1: guard
+        if self._pending_frame is None or self._session_start is None:
             logger.debug(
-                "EffectivenessTracker.on_verification: not pending — no-op."
+                "EffectivenessTracker.on_verification: not pending or no session — no-op."
             )
             return
 
-        # Capture pending data before clearing state.
+        # Step 2: capture locals
         frame = self._pending_frame
         pending_boxes = self._pending_boxes
         sound_label = self._pending_sound
+        session_start = self._session_start
+        cycle_count = self._cycle_count
 
-        # Clear pending state before dispatching async work.
+        # Step 3: clear pending state
         self._pending_frame = None
         self._pending_boxes = []
         self._pending_sound = None
 
-        outcome: Optional[str]
+        # Step 4: compute elapsed time
+        elapsed_s = int(cycle_count * self._settings.cooldown_seconds)
+
+        # Step 5: build timed outcome message and outcome key
         if has_cat:
-            outcome = "remained"
+            outcome: Optional[str] = "remained"
+            outcome_message = f"Cat remained after alert: {elapsed_s}s"
             logger.info(
                 "EffectivenessTracker.on_verification: outcome=remained "
-                "(cat still present, %d verification box(es)).",
-                len(boxes),
+                "(cycle=%d, elapsed=%ds, %d verification box(es)).",
+                cycle_count, elapsed_s, len(boxes),
             )
         else:
             outcome = "deterred"
+            outcome_message = f"Cat disappeared after alert: {elapsed_s}s"
             logger.info(
                 "EffectivenessTracker.on_verification: outcome=deterred "
-                "(cat left the frame)."
+                "(cycle=%d, elapsed=%ds).",
+                cycle_count, elapsed_s,
             )
 
-        # Build display label (defensive normalisation).
-        label = build_sound_label(sound_label)
-
-        # Annotate frame (pure function — returns a new array).
-        annotated = annotate_frame(frame, pending_boxes, label, outcome)
-
-        logger.info(
-            "EffectivenessTracker.on_verification: dispatching async save "
-            "(outcome=%s).",
-            outcome,
+        # Step 6: build session filepath
+        from catguard.screenshots import build_session_filepath, resolve_root
+        filepath = build_session_filepath(
+            resolve_root(self._settings), session_start, cycle_count
         )
-        # Effectiveness screenshots are analysis records — save regardless of
-        # whether the main window is open (FR-012 applies to raw screenshots only).
+
+        # Step 7: annotate frame
+        label = build_sound_label(sound_label)
+        annotated = annotate_frame(
+            frame, pending_boxes, label, outcome, outcome_message=outcome_message
+        )
+
+        # Step 8: dispatch async save with explicit filepath (bypasses suppression checks)
+        logger.info(
+            "EffectivenessTracker.on_verification: dispatching async save to %s.",
+            filepath,
+        )
         _save_annotated_async(
             annotated,
             self._settings,
             lambda: False,
             self._on_error,
+            filepath=filepath,
         )
+
+        # Step 9: close session on green outcome
+        if not has_cat:
+            self._session_start = None
+            self._cycle_count = 0
+            logger.info("EffectivenessTracker.on_verification: session closed.")
+
+    def abandon(self) -> None:
+        """Immediately abandon the active session and discard any pending frame.
+
+        Called on any pause: manual pause, camera error, or time-window boundary
+        (Plan Change 6, FR-010).  Safe to call at any time — idempotent no-op
+        when no session is active.
+
+        Resets all state to the same initial values as __init__:
+        - _pending_frame = None
+        - _pending_boxes = []
+        - _pending_sound  = None
+        - _session_start  = None
+        - _cycle_count    = 0
+        """
+        was_active = self._session_start is not None or self._pending_frame is not None
+        if was_active:
+            logger.info(
+                "EffectivenessTracker.abandon: session abandoned "
+                "(cycle=%d, session_start=%s).",
+                self._cycle_count,
+                self._session_start,
+            )
+        self._pending_frame = None
+        self._pending_boxes = []
+        self._pending_sound = None
+        self._session_start = None
+        self._cycle_count = 0

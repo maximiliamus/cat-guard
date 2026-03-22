@@ -300,6 +300,7 @@ def main() -> None:
     # Set up camera error callback (T041)
     def on_camera_error(error_msg: str) -> None:
         """Handle camera errors by showing notification via tray."""
+        tracker.abandon()  # camera error = pause → abandon active session (FR-010)
         icon = getattr(root, "_tray_icon", None)
         if icon is not None:
             notify_error(icon, f"Camera error: {error_msg}")
@@ -332,6 +333,13 @@ def main() -> None:
     def on_tracking_state_changed(is_tracking: bool) -> None:
         """Called by TimeWindowMonitor and tray state callbacks."""
         _was_tracking[0] = is_tracking
+        if not is_tracking:
+            tracker.abandon()  # any pause abandons the active session (FR-010)
+        win = getattr(root, "_main_window", None)
+        if win is not None:
+            if not is_tracking:
+                win.clear_frame()
+            win.set_capture_enabled(is_tracking)
         icon = getattr(root, "_tray_icon", None)
         if icon is not None:
             from catguard.tray import update_tray_icon_color, update_tray_menu
@@ -369,8 +377,11 @@ def main() -> None:
         """T011: Retrieve the latest raw frame without detection overlays.
 
         Used by ActionPanel to capture clean photos for saving.
-        Returns None if no frame is available yet.
+        Returns None when tracking is paused (camera unavailable) or when no
+        frame has been captured yet.
         """
+        if not detection_loop.is_tracking():
+            return None
         return detection_loop.get_latest_frame()
 
     def minimize_to_tray():

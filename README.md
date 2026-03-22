@@ -13,6 +13,7 @@ CatGuard watches your table with a webcam and plays an alert sound when it detec
 - Supports optional start at login and daily monitoring schedules.
 - Lets you take clean photos from the live view, with an optional countdown before capture.
 - Saves dated tracking screenshots for later review.
+- Tracks the full duration of each cat visit and records whether the alert worked, giving you a clear picture of how your cat responds over time.
 
 ## Interesting Facts
 
@@ -40,7 +41,7 @@ On first launch, CatGuard downloads the YOLO model (`~6 MB`) and caches it local
 1. Launch CatGuard.
 2. Find the CatGuard icon in your system tray or menu bar.
 3. Open `Settings…` to choose your camera, alert sound, schedule, and save locations.
-4. Use `Open` to show the live camera window.
+4. Use `Live View` to show the live camera window.
 5. Use `Pause` / `Continue` when you want to stop or resume monitoring without quitting the app.
 
 ## OS Security Warnings
