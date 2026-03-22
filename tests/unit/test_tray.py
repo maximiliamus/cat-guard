@@ -69,7 +69,7 @@ class TestMenuItems:
             assert any("Exit" in str(item) for item in captured_items)
 
     def test_open_item_present(self):
-        """Tray menu must expose an 'Open' item for the main window."""  
+        """Tray menu must expose a 'Live View' item for the main window."""
         root = MagicMock()
         stop_event = threading.Event()
         settings = Settings()
@@ -90,10 +90,10 @@ class TestMenuItems:
 
             build_tray_icon(root, stop_event, settings, on_save, MagicMock())
 
-            # Should contain an Open item
-            assert any("Open" in str(item) for item in captured_items)
+            # Should contain a Live View item
+            assert any("Live View" in str(item) for item in captured_items)
     def test_menu_order_settings_open_exit(self):
-        """Menu order must be Open, Settings, Separator, Pause/Continue, Separator, Exit."""
+        """Menu order must be Live View, Settings, Separator, Pause/Continue, Separator, Exit."""
         root = MagicMock()
         stop_event = threading.Event()
         settings = Settings()
@@ -117,8 +117,8 @@ class TestMenuItems:
             labels = [str(item) for item in captured_items]
             # Check that separators are present
             assert "SEPARATOR" in labels
-            # Check order: Open should be before Pause/Continue
-            open_idx = next((i for i, l in enumerate(labels) if "Open" in l), None)
+            # Check order: Live View should be before Pause/Continue
+            open_idx = next((i for i, l in enumerate(labels) if "Live View" in l), None)
             exit_idx = next((i for i, l in enumerate(labels) if "Exit" in l), None)
             assert open_idx is not None and exit_idx is not None
             assert open_idx < exit_idx

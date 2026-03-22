@@ -394,6 +394,9 @@ class DetectionLoop:
             self._is_tracking = False
         # Signal loop to stop (existing mechanism)
         self._stop_event.set()
+        # Defense-in-depth: clear any pending frame so a stale verification
+        # cannot fire after resume if abandon() was not called (Plan Change 6).
+        self._pending_frame = None
         logger.info("Tracking paused.")
         return True
 

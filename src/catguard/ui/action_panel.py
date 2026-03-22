@@ -196,6 +196,21 @@ class ActionPanel:
         self._last_save_dir = path
         logger.debug("Updated last_save_dir to %s", path)
 
+    def set_capture_enabled(self, enabled: bool) -> None:
+        """Enable or disable all photo-capture controls.
+
+        Call with ``enabled=False`` when the camera is unavailable (paused).
+        """
+        state = self._tk.NORMAL if enabled else self._tk.DISABLED
+        self._take_photo_btn.config(state=state)
+        self._delay_checkbox.config(state=state)
+        if enabled:
+            # Restore spinbox to its proper state based on the checkbox value.
+            spinbox_state = self._tk.NORMAL if self._delay_var.get() else self._tk.DISABLED
+        else:
+            spinbox_state = self._tk.DISABLED
+        self._delay_spinbox.config(state=spinbox_state)
+
     def _on_close_click(self) -> None:
         """Handle Close button click."""
         self._close_callback()

@@ -5,10 +5,11 @@ All I/O is synchronous; runs on the DetectionLoop daemon thread.
 
 Public API
 ----------
-resolve_root(settings)           → Path
-build_filepath(root, ts)         → Path
-is_within_time_window(settings)  → bool
-save_screenshot(frame_bgr, settings, is_window_open, on_error)
+resolve_root(settings)                              → Path
+build_filepath(root, ts)                            → Path
+build_session_filepath(root, session_ts, cycle_num) → Path
+is_within_time_window(settings)                     → bool
+save_screenshot(frame_bgr, settings, is_window_open, on_error, filepath=None)
 """
 from __future__ import annotations
 
@@ -70,6 +71,27 @@ def build_filepath(root: Path, ts: datetime) -> Path:
         if not candidate.exists():
             return candidate
         counter += 1
+
+
+# ---------------------------------------------------------------------------
+# build_session_filepath
+# ---------------------------------------------------------------------------
+
+def build_session_filepath(root: Path, session_ts: datetime, cycle_num: int) -> Path:
+    """Return the JPEG file path for a session evaluation frame.
+
+    Structure: ``<root>/<yyyy-mm-dd>/<YYYYMMDD-HHmmss>-<NNN>.jpg``
+
+    The date subfolder and filename prefix are derived from *session_ts* (the
+    alert-trigger timestamp), not from the current time.  The cycle number is
+    zero-padded to at least 3 digits; cycles ≥ 1000 produce a 4+ digit suffix.
+
+    Parent directory creation is NOT the responsibility of this function —
+    ``save_screenshot`` already calls ``path.parent.mkdir(parents=True, exist_ok=True)``.
+    """
+    date_folder = root / session_ts.strftime("%Y-%m-%d")
+    filename = f"{session_ts.strftime('%Y%m%d-%H%M%S')}-{cycle_num:03d}.jpg"
+    return date_folder / filename
 
 
 # ---------------------------------------------------------------------------
@@ -135,34 +157,44 @@ def save_screenshot(
     settings: "Settings",
     is_window_open: Callable[[], bool],
     on_error: Callable[[str], None],
+    filepath: Optional[Path] = None,
 ) -> None:
     """Attempt to save *frame_bgr* as a maximum-compression JPEG.
 
     Silently skips (no file, no error) when:
     - *frame_bgr* is None  (cooldown-suppressed event — FR-011)
-    - The main window is open  (FR-012)
-    - Outside the configured time window  (FR-015)
+    - The main window is open AND *filepath* is None  (FR-012)
+    - Outside the configured time window AND *filepath* is None  (FR-015)
+
+    When *filepath* is provided the caller-supplied path is used directly and
+    both the window-open and time-window suppression checks are bypassed.  This
+    is intentional: an explicit filepath signals a deliberate, unconditional
+    save decision (e.g. session evaluation frames — FR-010 / plan Change 2).
 
     On any I/O failure, logs the error and calls ``on_error(message)``.
     Never raises; the alert sound path is completely unaffected.
     """
-    # FR-011: cooldown-suppressed events carry no frame
+    # FR-011: cooldown-suppressed events carry no frame (always checked)
     if frame_bgr is None:
         return
 
-    # FR-012: suppress when main window is visible
-    if is_window_open():
-        logger.info("save_screenshot: skipped — main window is open.")
-        return
+    if filepath is None:
+        # FR-012: suppress when main window is visible
+        if is_window_open():
+            logger.info("save_screenshot: skipped — main window is open.")
+            return
 
-    # FR-015: suppress outside the configured time window
-    if not is_within_time_window(settings):
-        logger.info("save_screenshot: skipped — outside configured time window.")
-        return
+        # FR-015: suppress outside the configured time window
+        if not is_within_time_window(settings):
+            logger.info("save_screenshot: skipped — outside configured time window.")
+            return
 
     try:
-        root = resolve_root(settings)
-        path = build_filepath(root, datetime.now())
+        if filepath is None:
+            root = resolve_root(settings)
+            path = build_filepath(root, datetime.now())
+        else:
+            path = filepath
         path.parent.mkdir(parents=True, exist_ok=True)
 
         logger.info("save_screenshot: attempting to save screenshot to %s", path)

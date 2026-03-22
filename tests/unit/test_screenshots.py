@@ -6,6 +6,8 @@ Covers (by task):
          JPEG quality parameter (FR-017)
   T015 : save_screenshot error paths — on_error callback, no exception propagation
   T020 : is_within_time_window — disabled, same-day, midnight-spanning, degenerate
+  T002 (012) : build_session_filepath — path format, zero-padding, session-date subfolder
+  T002 (012) : save_screenshot with explicit filepath — bypasses all suppression checks
 """
 from __future__ import annotations
 
@@ -263,6 +265,130 @@ class TestSaveScreenshotErrors:
             save_screenshot(
                 frame, s, is_window_open=lambda: False, on_error=lambda msg: None
             )
+
+
+# ---------------------------------------------------------------------------
+# T020: is_within_time_window
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# T002 (012): build_session_filepath
+# ---------------------------------------------------------------------------
+
+class TestBuildSessionFilepath:
+    """T002 (012) — build_session_filepath returns session-prefixed JPEG paths."""
+
+    def test_returns_path_in_date_subfolder(self, tmp_path):
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        result = build_session_filepath(tmp_path, session_ts, 1)
+        assert result.parent == tmp_path / "2026-03-22"
+
+    def test_filename_format(self, tmp_path):
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        result = build_session_filepath(tmp_path, session_ts, 1)
+        assert result.name == "20260322-143000-001.jpg"
+
+    def test_cycle_zero_padded_to_three_digits(self, tmp_path):
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        assert build_session_filepath(tmp_path, session_ts, 5).name == "20260322-143000-005.jpg"
+        assert build_session_filepath(tmp_path, session_ts, 42).name == "20260322-143000-042.jpg"
+        assert build_session_filepath(tmp_path, session_ts, 999).name == "20260322-143000-999.jpg"
+
+    def test_date_subfolder_from_session_ts_not_current_time(self, tmp_path):
+        """Date folder must come from session_ts, not datetime.now()."""
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2025, 12, 31, 23, 59, 59)
+        result = build_session_filepath(tmp_path, session_ts, 1)
+        assert result.parent.name == "2025-12-31"
+
+    def test_different_cycles_produce_different_filenames(self, tmp_path):
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        p1 = build_session_filepath(tmp_path, session_ts, 1)
+        p2 = build_session_filepath(tmp_path, session_ts, 2)
+        assert p1 != p2
+        assert p1.name == "20260322-143000-001.jpg"
+        assert p2.name == "20260322-143000-002.jpg"
+
+    def test_returns_path_object(self, tmp_path):
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        result = build_session_filepath(tmp_path, session_ts, 1)
+        assert isinstance(result, Path)
+
+    def test_large_cycle_not_truncated(self, tmp_path):
+        """Cycles >= 1000 produce a 4-digit suffix (no truncation)."""
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        result = build_session_filepath(tmp_path, session_ts, 1000)
+        assert result.name == "20260322-143000-1000.jpg"
+
+
+# ---------------------------------------------------------------------------
+# T002 (012): save_screenshot with explicit filepath
+# ---------------------------------------------------------------------------
+
+class TestSaveScreenshotWithFilepath:
+    """T002 (012) — save_screenshot(filepath=…) bypasses all suppression checks."""
+
+    def test_writes_to_caller_supplied_path(self, tmp_path):
+        from catguard.screenshots import save_screenshot
+        target = tmp_path / "custom" / "explicit.jpg"
+        save_screenshot(
+            _blank_frame(), _settings(tracking_directory=str(tmp_path)),
+            is_window_open=lambda: False, on_error=MagicMock(), filepath=target,
+        )
+        assert target.exists()
+
+    def test_explicit_filepath_bypasses_window_open_suppression(self, tmp_path):
+        """Window open would normally suppress — explicit filepath must ignore it."""
+        from catguard.screenshots import save_screenshot
+        target = tmp_path / "session" / "frame.jpg"
+        save_screenshot(
+            _blank_frame(), _settings(tracking_directory=str(tmp_path)),
+            is_window_open=lambda: True, on_error=MagicMock(), filepath=target,
+        )
+        assert target.exists(), "File must be saved even when main window is open"
+
+    def test_explicit_filepath_bypasses_time_window_suppression(self, tmp_path):
+        """Outside time window would normally suppress — explicit filepath must ignore it."""
+        from catguard.screenshots import save_screenshot
+        target = tmp_path / "session" / "frame.jpg"
+        s = _settings(
+            tracking_directory=str(tmp_path),
+            tracking_window_enabled=True,
+            tracking_window_start="08:00",
+            tracking_window_end="09:00",
+        )
+        with patch("catguard.screenshots.datetime") as mock_dt:
+            mock_dt.now.return_value = datetime(2026, 3, 22, 20, 0, 0)  # outside window
+            save_screenshot(
+                _blank_frame(), s, is_window_open=lambda: False,
+                on_error=MagicMock(), filepath=target,
+            )
+        assert target.exists(), "File must be saved even when outside time window"
+
+    def test_explicit_filepath_creates_parent_dirs(self, tmp_path):
+        from catguard.screenshots import save_screenshot
+        target = tmp_path / "deep" / "nested" / "session.jpg"
+        save_screenshot(
+            _blank_frame(), _settings(tracking_directory=str(tmp_path)),
+            is_window_open=lambda: False, on_error=MagicMock(), filepath=target,
+        )
+        assert target.exists()
+
+    def test_none_frame_still_skips_even_with_filepath(self, tmp_path):
+        """frame_bgr=None always skips regardless of filepath."""
+        from catguard.screenshots import save_screenshot
+        target = tmp_path / "should_not_exist.jpg"
+        save_screenshot(
+            None, _settings(tracking_directory=str(tmp_path)),
+            is_window_open=lambda: False, on_error=MagicMock(), filepath=target,
+        )
+        assert not target.exists()
 
 
 # ---------------------------------------------------------------------------

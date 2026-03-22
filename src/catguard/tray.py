@@ -57,13 +57,19 @@ def _ensure_main_window(root, detection_loop) -> None:
 
     detection_loop.set_frame_callback(_on_frame)
     logger.info("Main window frame callback registered.")
+
+    tracking = detection_loop.is_tracking()
+    if not tracking:
+        win.clear_frame()
+    win.set_capture_enabled(tracking)
+
     win.show_or_focus()
 
 
-def _on_open_clicked_factory(root, detection_loop):
+def _on_live_view_clicked_factory(root, detection_loop):
     """Return a pystray menu handler bound to *root* and *detection_loop*."""
     def handler(icon, item) -> None:  # pragma: no cover — runs in pystray thread
-        logger.info("Open clicked — main window requested.")
+        logger.info("Live View clicked — main window requested.")
         root.after(0, lambda: _ensure_main_window(root, detection_loop))
     return handler
 
@@ -116,7 +122,7 @@ def build_tray_icon(
                 logger.error("Failed to resume tracking: %s", exc)
                 notify_error(icon, f"Failed to resume: {exc}")
 
-    on_open_clicked = _on_open_clicked_factory(root, detection_loop)
+    on_live_view_clicked = _on_live_view_clicked_factory(root, detection_loop)
 
     def on_logs_clicked(icon, item):
         from catguard.ui.log_viewer import open_log_viewer
@@ -127,7 +133,7 @@ def build_tray_icon(
 
     # Reorganized menu with separators (T032, T033, T010)
     menu = pystray.Menu(
-        pystray.MenuItem("Open", on_open_clicked),
+        pystray.MenuItem("Live View", on_live_view_clicked),
         pystray.MenuItem("Logs", on_logs_clicked),
         pystray.MenuItem("Settings\u2026", on_settings_clicked),
         pystray.Menu.SEPARATOR,
@@ -209,7 +215,7 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
                     logger.error("Failed to resume tracking: %s", exc)
                     notify_error(icon, f"Failed to resume: {exc}")
 
-        on_open_clicked = _on_open_clicked_factory(root, detection_loop)
+        on_live_view_clicked = _on_live_view_clicked_factory(root, detection_loop)
 
         def on_logs_clicked(icon, item):
             from catguard.ui.log_viewer import open_log_viewer
@@ -220,7 +226,7 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
 
         # Reorganized menu with separators (T032, T033)
         menu = pystray.Menu(
-            pystray.MenuItem("Open", on_open_clicked),
+            pystray.MenuItem("Live View", on_live_view_clicked),
             pystray.MenuItem("Logs", on_logs_clicked),
             pystray.MenuItem("Settings\u2026", on_settings_clicked),
             pystray.Menu.SEPARATOR,
