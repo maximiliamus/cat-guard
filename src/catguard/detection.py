@@ -293,13 +293,8 @@ class DetectionLoop:
         self._model_input_name: Optional[str] = None
         self._frame_callback: Optional[Callable] = None
         self._frame_callback_lock = threading.Lock()
-        self._pending_frame: Optional[_NpArray] = None
-        """Deep copy of detection frame held until verification fires.
-
-        ``None`` when no verification is pending.  Acts as the sole
-        pending-state sentinel (YAGNI: detection-time boxes and sound label
-        are owned by EffectivenessTracker, not this loop).
-        """
+        self._verification_pending = False
+        """True while the post-alert verification callback is still due."""
         self._latest_frame: Optional[_NpArray] = None
         """Latest raw BGR frame from the camera (for photo capture, etc).
         
@@ -329,6 +324,7 @@ class DetectionLoop:
     def stop(self) -> None:
         """Signal the loop to stop and wait up to 5 s for it to finish."""
         self._stop_event.set()
+        self._verification_pending = False
         if self._thread is not None:
             self._thread.join(timeout=5.0)
         logger.info("DetectionLoop stopped.")
@@ -350,13 +346,14 @@ class DetectionLoop:
         logger.debug("Frame callback %s.", "registered" if cb is not None else "cleared")
 
     def set_verification_callback(
-        self, cb: Optional[Callable[[bool, "list[BoundingBox]"], None]]
+        self,
+        cb: Optional[Callable[[_NpArray, bool, "list[BoundingBox]"], None]],
     ) -> None:
         """Register or clear the post-cooldown verification callback.
 
-        Called as ``cb(has_cat, boxes)`` from the detection loop thread
+        Called as ``cb(frame_bgr, has_cat, boxes)`` from the detection loop thread
         on the first iteration where ``_cooldown_elapsed()`` is True and
-        a pending frame is held in memory.  Implementations MUST NOT
+        a verification is pending. Implementations MUST NOT
         perform blocking I/O directly; dispatch to a background thread.
         Pass *cb=None* to disable.
         """
@@ -394,9 +391,8 @@ class DetectionLoop:
             self._is_tracking = False
         # Signal loop to stop (existing mechanism)
         self._stop_event.set()
-        # Defense-in-depth: clear any pending frame so a stale verification
-        # cannot fire after resume if abandon() was not called (Plan Change 6).
-        self._pending_frame = None
+        # Defense-in-depth: clear verification state so a stale callback cannot fire later.
+        self._verification_pending = False
         logger.info("Tracking paused.")
         return True
 
@@ -562,7 +558,7 @@ class DetectionLoop:
                 conf = self._settings.confidence_threshold
 
                 # --- Verification trigger (T006/T022) ----------------------------
-                # Before running inference: if a pending frame is held and the
+                # Before running inference: if verification is pending and the
                 # cooldown has elapsed, fire the verification callback with the
                 # current live frame's inference results.
                 # We run inference first below and store results; the trigger
@@ -577,10 +573,11 @@ class DetectionLoop:
                 # Verification trigger: fires once per pending cycle on the first
                 # post-cooldown frame.  Pending state is cleared BEFORE invoking
                 # the callback to prevent re-entrance.
-                if self._pending_frame is not None and self._cooldown_elapsed():
+                if self._verification_pending and self._cooldown_elapsed():
                     has_cat = len(all_boxes) > 0
                     cb = self._verification_callback
-                    self._pending_frame = None  # clear before callback
+                    verification_frame = frame.copy()
+                    self._verification_pending = False  # clear before callback
                     logger.debug(
                         "Verification trigger fired: has_cat=%s, boxes=%d",
                         has_cat,
@@ -588,7 +585,7 @@ class DetectionLoop:
                     )
                     if cb is not None:
                         try:
-                            cb(has_cat, all_boxes)
+                            cb(verification_frame, has_cat, all_boxes)
                         except Exception:
                             logger.exception("Verification callback raised an exception.")
 
@@ -597,14 +594,13 @@ class DetectionLoop:
                     now = datetime.now(timezone.utc)
                     if self._cooldown_elapsed():
                         self._last_alert_time = now
-                        # Mandatory copy: cap.read() overwrites the buffer
-                        # on the next iteration.
-                        self._pending_frame = frame.copy()
+                        detection_frame = frame.copy()
+                        self._verification_pending = True
                         event = DetectionEvent(
                             timestamp=now,
                             confidence=max_conf,
                             action=DetectionAction.SOUND_PLAYED,
-                            frame_bgr=self._pending_frame,
+                            frame_bgr=detection_frame,
                             boxes=all_boxes,
                         )
                         logger.info(

@@ -1,9 +1,10 @@
-"""Frame annotation and delayed-save for alert effectiveness tracking.
+"""Frame annotation and async save helpers for cat-session tracking.
 
 Responsibilities:
 - annotate_frame(): apply bounding boxes, sound label, and outcome overlay to a frame
 - build_sound_label(): normalise play_alert() return value for display
-- EffectivenessTracker: manage pending snapshot lifecycle (store → verify → save)
+- format_session_duration(): render compact elapsed durations for overlays and logs
+- EffectivenessTracker: manage session metadata and save the on-disk frame timeline
 - _save_annotated_async(): fire-and-forget daemon thread for async disk write
 
 All annotation is applied to a *copy* of the input frame; the original is never
@@ -53,6 +54,7 @@ FONT_THICK = 1
 LABEL_PAD = 4
 LINE_TYPE = cv2.LINE_AA if cv2 is not None else None
 
+DETECTED_BG = (64, 64, 64)     # BGR dark gray
 SUCCESS_BG = (0, 180, 0)       # BGR green
 FAILURE_BG = (0, 0, 200)       # BGR red
 TEXT_COLOR = (255, 255, 255)    # white
@@ -95,6 +97,20 @@ def build_sound_label(value: Optional[str]) -> str:
     return Path(value).name
 
 
+def format_session_duration(total_seconds: float | int) -> str:
+    """Return a compact human-readable session duration string."""
+    total = max(0, int(total_seconds))
+    if total < 60:
+        return f"{total}s"
+
+    minutes, seconds = divmod(total, 60)
+    if total < 3600:
+        return f"{minutes}m {seconds}s"
+
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m {seconds}s"
+
+
 # ---------------------------------------------------------------------------
 # T012 + T013 + T018: annotate_frame()
 # ---------------------------------------------------------------------------
@@ -113,7 +129,8 @@ def annotate_frame(
        drawn on the detected cat regions.
     2. **Sound label** — filename or "Alert: Default" in the top-left corner.
     3. **Outcome overlay** — full-width filled strip at the bottom edge:
-       green for ``"deterred"``, red for ``"remained"``, absent for ``None``.
+       dark gray for ``"detected"``, green for ``"deterred"``,
+       red for ``"remained"``, absent for ``None``.
 
     Parameters
     ----------
@@ -124,12 +141,12 @@ def annotate_frame(
     sound_label:
         Text for the top-left corner (already normalised by build_sound_label).
     outcome:
-        ``"deterred"``, ``"remained"``, or ``None`` (unknown / not yet determined).
-        Determines the **colour** of the outcome strip.  When ``None``, no strip
+        ``"detected"``, ``"deterred"``, ``"remained"``, or ``None``.
+        Determines the **colour** of the outcome strip. When ``None``, no strip
         is drawn regardless of *outcome_message*.
     outcome_message:
-        Optional custom text for the outcome strip.  When provided and *outcome*
-        is ``"deterred"`` or ``"remained"``, this string replaces the hardcoded
+        Optional custom text for the outcome strip. When provided and *outcome*
+        is not ``None``, this string replaces the hardcoded
         default strip text.  Useful for session-timed labels such as
         ``"Cat remained after alert: 30s"``.
 
@@ -149,7 +166,10 @@ def annotate_frame(
     _draw_top_bar(out, sound_label)
 
     # --- Layer 3: Outcome overlay bottom strip (T018) ----------------------
-    if outcome == "deterred":
+    if outcome == "detected":
+        text = outcome_message if outcome_message is not None else "Cat detected"
+        _draw_outcome_strip(out, DETECTED_BG, text)
+    elif outcome == "deterred":
         text = outcome_message if outcome_message is not None else "Cat disappeared after alert"
         _draw_outcome_strip(out, SUCCESS_BG, text)
     elif outcome == "remained":
@@ -277,6 +297,10 @@ def _draw_top_bar(frame: "np.ndarray", sound_label: str) -> None:
     _h, w = frame.shape[:2]
     pad = OVERLAY_PAD
 
+    if _PIL_Image is None or _PIL_ImageDraw is None or _PIL_ImageFont is None:
+        _draw_top_bar_cv2(frame, sound_label, timestamp)
+        return
+
     pil_img = _PIL_Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     draw = _PIL_ImageDraw.Draw(pil_img)
     font = _load_unicode_font(OVERLAY_FONT_SIZE)
@@ -298,6 +322,30 @@ def _draw_top_bar(frame: "np.ndarray", sound_label: str) -> None:
 
     # Write back to frame in-place (BGR)
     frame[:] = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+
+def _draw_top_bar_cv2(frame: "np.ndarray", sound_label: str, timestamp: str) -> None:
+    """Fallback top-bar renderer used when Pillow is unavailable."""
+    _h, w = frame.shape[:2]
+    cv2.rectangle(frame, (0, 0), (w, BAR_HEIGHT), OVERLAY_BG, -1)
+
+    (_, sound_h), sound_baseline = cv2.getTextSize(
+        sound_label, FONT, FONT_SCALE, FONT_THICK
+    )
+    (ts_w, ts_h), ts_baseline = cv2.getTextSize(
+        timestamp, FONT, FONT_SCALE, FONT_THICK
+    )
+    sound_y = (BAR_HEIGHT + sound_h - sound_baseline) // 2
+    ts_y = (BAR_HEIGHT + ts_h - ts_baseline) // 2
+
+    cv2.putText(
+        frame, sound_label, (OVERLAY_PAD, sound_y),
+        FONT, FONT_SCALE, TEXT_COLOR, FONT_THICK, LINE_TYPE,
+    )
+    cv2.putText(
+        frame, timestamp, (w - ts_w - OVERLAY_PAD, ts_y),
+        FONT, FONT_SCALE, TEXT_COLOR, FONT_THICK, LINE_TYPE,
+    )
 
 
 def _draw_outcome_strip(
@@ -374,34 +422,7 @@ def _save_annotated_async(
 # ---------------------------------------------------------------------------
 
 class EffectivenessTracker:
-    """Manages the pending screenshot lifecycle for alert effectiveness tracking.
-
-    State machine::
-
-        [idle]
-          ──on_detection()──▶ [pending: frame held in memory]
-                                    │
-                      on_detection() while pending → silently ignored (FR-005a)
-                                    │
-                              on_verification(has_cat)
-                                    │
-                          ┌─────────┴──────────┐
-                     has_cat=False          has_cat=True
-                          │                     │
-                   outcome="deterred"    outcome="remained"
-                          └─────────┬──────────┘
-                          annotate_frame(outcome)
-                          _save_annotated_async()
-                          clear pending state
-                                    │
-                                 [idle]
-
-    Thread safety: on_detection() is called from the main thread (main.py
-    on_cat_detected callback); on_verification() is called from the
-    DetectionLoop daemon thread.  The pending state is guarded by the fact
-    that only one SOUND_PLAYED event fires per cooldown cycle (FR-005a) and
-    the loop clears _pending_frame before invoking on_verification.
-    """
+    """Manage the saved on-disk timeline for one active cat session."""
 
     def __init__(
         self,
@@ -413,13 +434,11 @@ class EffectivenessTracker:
         self._is_window_open = is_window_open
         self._on_error = on_error
 
-        self._pending_frame: Optional["np.ndarray"] = None
-        self._pending_boxes: "list[BoundingBox]" = []
-        self._pending_sound: Optional[str] = None
-
-        # Session tracking state (FR-010, Plan Change 2)
         self._session_start: Optional[_dt] = None
         self._cycle_count: int = 0
+        self._frame_index: int = 0
+        self._active_sound_label: Optional[str] = None
+        self._awaiting_verification: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -427,8 +446,8 @@ class EffectivenessTracker:
 
     @property
     def _is_pending(self) -> bool:
-        """True while a detection frame is held in memory awaiting verification."""
-        return self._pending_frame is not None
+        """True while the active alert cycle is waiting for verification."""
+        return self._awaiting_verification
 
     def on_detection(
         self,
@@ -436,124 +455,57 @@ class EffectivenessTracker:
         boxes: "list[BoundingBox]",
         sound_label: str,
     ) -> None:
-        """Store a deep copy of the detection frame for later annotation.
-
-        Three-state logic (FR-005a, FR-010, Plan Change 2):
-        (a) Already pending → silently ignore (mid-cycle guard).
-        (b) No active session → start new session (set _session_start, _cycle_count=1).
-        (c) Session open, between cycles → increment _cycle_count.
-        Common step: store pending frame, boxes, sound.
-        """
-        # State (a): already pending — ignore until verification clears it
+        """Start or advance a session when an alerting detection fires."""
         if self._is_pending:
             logger.debug(
-                "EffectivenessTracker.on_detection: already pending — ignoring "
-                "(FR-005a)."
+                "EffectivenessTracker.on_detection: already awaiting verification; "
+                "ignoring duplicate detection."
             )
             return
 
+        if frame is None:
+            logger.debug(
+                "EffectivenessTracker.on_detection: detection frame missing; ignoring."
+            )
+            return
+
+        from catguard.screenshots import build_session_filepath, resolve_root
+
+        is_new_session = self._session_start is None
         if self._session_start is None:
-            # State (b): no active session — start a new one
             self._session_start = _dt.now()
             self._cycle_count = 1
-            logger.info(
-                "EffectivenessTracker.on_detection: new session started at %s.",
-                self._session_start,
-            )
+            self._frame_index = 1
         else:
-            # State (c): session open, between cycles — advance cycle counter
             self._cycle_count += 1
-            logger.debug(
-                "EffectivenessTracker.on_detection: session cycle %d.",
+        self._active_sound_label = sound_label
+        self._awaiting_verification = True
+
+        if not is_new_session:
+            logger.info(
+                "EffectivenessTracker.on_detection: cycle %d started for existing "
+                "session (frame_index=%d, sound=%r).",
                 self._cycle_count,
-            )
-
-        self._pending_frame = frame.copy()
-        self._pending_boxes = list(boxes)
-        self._pending_sound = sound_label
-        logger.debug(
-            "EffectivenessTracker.on_detection: stored frame (%dx%d), "
-            "%d box(es), sound=%r.",
-            frame.shape[1], frame.shape[0],
-            len(boxes),
-            sound_label,
-        )
-
-    def on_verification(
-        self,
-        has_cat: bool,
-        boxes: "list[BoundingBox]",
-    ) -> None:
-        """Annotate and async-save the pending frame using the verification result.
-
-        Multi-cycle session logic (FR-010, Plan Change 2):
-        1. Guard — no-op if _pending_frame is None or _session_start is None.
-        2. Capture locals (frame, boxes, sound, session_start, cycle_count).
-        3. Clear pending state (_pending_frame, _pending_boxes, _pending_sound).
-        4. Compute elapsed_s = int(cycle_count * cooldown_seconds).
-        5. Build timed outcome message.
-        6. Build session filepath via build_session_filepath.
-        7. Annotate frame with outcome_message.
-        8. Dispatch _save_annotated_async with explicit filepath.
-        9. If has_cat=False: close session (_session_start=None, _cycle_count=0).
-
-        Called from DetectionLoop daemon thread at cooldown expiry.
-        """
-        # Step 1: guard
-        if self._pending_frame is None or self._session_start is None:
-            logger.debug(
-                "EffectivenessTracker.on_verification: not pending or no session — no-op."
+                self._frame_index,
+                sound_label,
             )
             return
 
-        # Step 2: capture locals
-        frame = self._pending_frame
-        pending_boxes = self._pending_boxes
-        sound_label = self._pending_sound
-        session_start = self._session_start
-        cycle_count = self._cycle_count
-
-        # Step 3: clear pending state
-        self._pending_frame = None
-        self._pending_boxes = []
-        self._pending_sound = None
-
-        # Step 4: compute elapsed time
-        elapsed_s = int(cycle_count * self._settings.cooldown_seconds)
-
-        # Step 5: build timed outcome message and outcome key
-        if has_cat:
-            outcome: Optional[str] = "remained"
-            outcome_message = f"Cat remained after alert: {elapsed_s}s"
-            logger.info(
-                "EffectivenessTracker.on_verification: outcome=remained "
-                "(cycle=%d, elapsed=%ds, %d verification box(es)).",
-                cycle_count, elapsed_s, len(boxes),
-            )
-        else:
-            outcome = "deterred"
-            outcome_message = f"Cat disappeared after alert: {elapsed_s}s"
-            logger.info(
-                "EffectivenessTracker.on_verification: outcome=deterred "
-                "(cycle=%d, elapsed=%ds).",
-                cycle_count, elapsed_s,
-            )
-
-        # Step 6: build session filepath
-        from catguard.screenshots import build_session_filepath, resolve_root
         filepath = build_session_filepath(
-            resolve_root(self._settings), session_start, cycle_count
+            resolve_root(self._settings), self._session_start, self._frame_index
         )
-
-        # Step 7: annotate frame
-        label = build_sound_label(sound_label)
         annotated = annotate_frame(
-            frame, pending_boxes, label, outcome, outcome_message=outcome_message
+            frame,
+            boxes,
+            build_sound_label(sound_label),
+            "detected",
         )
-
-        # Step 8: dispatch async save with explicit filepath (bypasses suppression checks)
         logger.info(
-            "EffectivenessTracker.on_verification: dispatching async save to %s.",
+            "EffectivenessTracker.on_detection: session started at %s "
+            "(cycle=%d, frame_index=%d, filepath=%s).",
+            self._session_start,
+            self._cycle_count,
+            self._frame_index,
             filepath,
         )
         _save_annotated_async(
@@ -564,36 +516,97 @@ class EffectivenessTracker:
             filepath=filepath,
         )
 
-        # Step 9: close session on green outcome
-        if not has_cat:
-            self._session_start = None
-            self._cycle_count = 0
-            logger.info("EffectivenessTracker.on_verification: session closed.")
+    def on_verification(
+        self,
+        frame_bgr: "np.ndarray",
+        has_cat: bool,
+        boxes: "list[BoundingBox]",
+    ) -> None:
+        """Annotate and save the live verification frame for the current cycle."""
+        if self._session_start is None or not self._awaiting_verification:
+            logger.debug(
+                "EffectivenessTracker.on_verification: no active verification pending."
+            )
+            return
+
+        session_start = self._session_start
+        cycle_count = self._cycle_count
+        next_frame_index = self._frame_index + 1
+        sound_label = build_sound_label(self._active_sound_label)
+        self._awaiting_verification = False
+        elapsed_s = int(cycle_count * self._settings.cooldown_seconds)
+        elapsed_text = format_session_duration(elapsed_s)
+
+        if has_cat:
+            outcome: Optional[str] = "remained"
+            outcome_message = f"Cat remained after alert: {elapsed_text}"
+        else:
+            outcome = "deterred"
+            outcome_message = f"Cat disappeared after alert: {elapsed_text}"
+
+        from catguard.screenshots import build_session_filepath, resolve_root
+        filepath = build_session_filepath(
+            resolve_root(self._settings), session_start, next_frame_index
+        )
+
+        annotated = annotate_frame(
+            frame_bgr,
+            boxes,
+            sound_label,
+            outcome,
+            outcome_message=outcome_message,
+        )
+        self._frame_index = next_frame_index
+        logger.info(
+            "EffectivenessTracker.on_verification: outcome=%s "
+            "(cycle=%d, frame_index=%d, elapsed=%s, filepath=%s).",
+            outcome,
+            cycle_count,
+            self._frame_index,
+            elapsed_text,
+            filepath,
+        )
+        _save_annotated_async(
+            annotated,
+            self._settings,
+            lambda: False,
+            self._on_error,
+            filepath=filepath,
+        )
+
+        if has_cat:
+            return
+
+        total_frames = self._frame_index
+        logger.info(
+            "EffectivenessTracker.on_verification: session closed "
+            "(saved_frames=%d, elapsed=%s).",
+            total_frames,
+            elapsed_text,
+        )
+        self._reset_session()
 
     def abandon(self) -> None:
-        """Immediately abandon the active session and discard any pending frame.
-
-        Called on any pause: manual pause, camera error, or time-window boundary
-        (Plan Change 6, FR-010).  Safe to call at any time — idempotent no-op
-        when no session is active.
-
-        Resets all state to the same initial values as __init__:
-        - _pending_frame = None
-        - _pending_boxes = []
-        - _pending_sound  = None
-        - _session_start  = None
-        - _cycle_count    = 0
-        """
-        was_active = self._session_start is not None or self._pending_frame is not None
+        """Immediately abandon the active session without creating a closing frame."""
+        was_active = self._session_start is not None or self._awaiting_verification
         if was_active:
+            elapsed_text = format_session_duration(
+                int(self._cycle_count * self._settings.cooldown_seconds)
+            )
             logger.info(
                 "EffectivenessTracker.abandon: session abandoned "
-                "(cycle=%d, session_start=%s).",
+                "(cycle=%d, frame_index=%d, elapsed=%s, session_start=%s).",
                 self._cycle_count,
+                self._frame_index,
+                elapsed_text,
                 self._session_start,
             )
-        self._pending_frame = None
-        self._pending_boxes = []
-        self._pending_sound = None
+        self._reset_session()
+
+    def _reset_session(self) -> None:
+        """Return the tracker to its idle state."""
         self._session_start = None
         self._cycle_count = 0
+        self._frame_index = 0
+        self._active_sound_label = None
+        self._awaiting_verification = False
