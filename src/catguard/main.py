@@ -398,6 +398,7 @@ def main() -> None:
 
     def on_shutdown(*_args) -> None:
         logger.info("Shutting down CatGuard…")
+        tracker.abandon()
         time_window_monitor.stop()
         sleep_watcher.stop()
         detection_loop.stop()

@@ -17,6 +17,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime, timezone
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
@@ -30,6 +31,7 @@ from catguard.detection import (
     _INPUT_SIZE,
     _postprocess,
     _preprocess_frame,
+    BoundingBox,
     DetectionAction,
     DetectionEvent,
     DetectionLoop,
@@ -143,3 +145,77 @@ class TestDetectionIntegration:
             loop._thread.join(timeout=10.0)
 
         assert not loop._thread.is_alive(), "DetectionLoop thread did not stop cleanly"
+
+
+@pytest.mark.integration
+class TestVerificationCallbackIntegration:
+    """Integration coverage for the live verification-frame callback contract."""
+
+    def _run_with_frames(self, loop: DetectionLoop, frames, boxes_per_frame):
+        from unittest.mock import MagicMock, patch
+
+        call_count = [0]
+
+        def fake_read():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(frames):
+                return True, frames[idx]
+            loop._stop_event.set()
+            return False, None
+
+        with patch("cv2.VideoCapture") as mock_cap_cls:
+            mock_cap = MagicMock()
+            mock_cap.isOpened.return_value = True
+            mock_cap.read.side_effect = fake_read
+            mock_cap_cls.return_value = mock_cap
+            loop._model = MagicMock()
+            loop._model.run.return_value = [np.zeros((1, 84, 8400), dtype=np.float32)]
+            with patch.object(loop, "_load_model"):
+                with patch("catguard.detection._preprocess_frame", return_value=np.zeros((1, 3, 640, 640), dtype=np.float32)):
+                    with patch("catguard.detection._postprocess", side_effect=boxes_per_frame):
+                        loop._run()
+
+    def test_verification_callback_receives_live_frame_and_boxes(self):
+        from datetime import timedelta
+
+        received = []
+        loop = DetectionLoop(Settings(cooldown_seconds=1.0), MagicMock())
+        loop.set_verification_callback(
+            lambda frame_bgr, has_cat, boxes: received.append((frame_bgr, has_cat, boxes))
+        )
+        loop._verification_pending = True
+        loop._last_alert_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+        verification_frame = _make_blank_frame()
+        verification_boxes = [BoundingBox(10, 10, 40, 40, 0.8)]
+        self._run_with_frames(loop, [verification_frame], [[*verification_boxes]])
+
+        assert len(received) == 1
+        frame_bgr, has_cat, boxes = received[0]
+        assert frame_bgr.shape == verification_frame.shape
+        assert has_cat is True
+        assert boxes == verification_boxes
+
+    def test_verification_callback_frame_survives_loop_advance(self):
+        from datetime import timedelta
+
+        received_frames = []
+        loop = DetectionLoop(Settings(cooldown_seconds=1.0), MagicMock())
+
+        def capture(frame_bgr, has_cat, boxes):
+            received_frames.append(frame_bgr)
+            assert loop._verification_pending is False
+
+        loop.set_verification_callback(capture)
+        loop._verification_pending = True
+        loop._last_alert_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+        first_frame = _make_blank_frame()
+        second_frame = np.full_like(first_frame, 255)
+        self._run_with_frames(loop, [first_frame, second_frame], [[], []])
+        first_frame[:] = 127
+
+        assert len(received_frames) == 1
+        assert received_frames[0] is not first_frame
+        assert int(received_frames[0][0, 0, 0]) == 0

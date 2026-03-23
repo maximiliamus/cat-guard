@@ -7,7 +7,7 @@ Public API
 ----------
 resolve_root(settings)                              → Path
 build_filepath(root, ts)                            → Path
-build_session_filepath(root, session_ts, cycle_num) → Path
+build_session_filepath(root, session_ts, frame_index) → Path
 is_within_time_window(settings)                     → bool
 save_screenshot(frame_bgr, settings, is_window_open, on_error, filepath=None)
 """
@@ -77,20 +77,26 @@ def build_filepath(root: Path, ts: datetime) -> Path:
 # build_session_filepath
 # ---------------------------------------------------------------------------
 
-def build_session_filepath(root: Path, session_ts: datetime, cycle_num: int) -> Path:
-    """Return the JPEG file path for a session evaluation frame.
+def build_session_filepath(root: Path, session_ts: datetime, frame_index: int) -> Path:
+    """Return the JPEG file path for a saved session frame.
 
     Structure: ``<root>/<yyyy-mm-dd>/<YYYYMMDD-HHmmss>-<NNN>.jpg``
 
     The date subfolder and filename prefix are derived from *session_ts* (the
-    alert-trigger timestamp), not from the current time.  The cycle number is
-    zero-padded to at least 3 digits; cycles ≥ 1000 produce a 4+ digit suffix.
+    session-start timestamp), not from the current time. The frame index is a
+    1-based saved-frame counter within the session: ``001`` is always the
+    neutral session-start frame and later frames increment in save order. The
+    suffix is zero-padded to at least 3 digits; indices ≥ 1000 produce a 4+
+    digit suffix.
 
     Parent directory creation is NOT the responsibility of this function —
     ``save_screenshot`` already calls ``path.parent.mkdir(parents=True, exist_ok=True)``.
     """
+    if frame_index < 1:
+        raise ValueError("frame_index must be >= 1")
+
     date_folder = root / session_ts.strftime("%Y-%m-%d")
-    filename = f"{session_ts.strftime('%Y%m%d-%H%M%S')}-{cycle_num:03d}.jpg"
+    filename = f"{session_ts.strftime('%Y%m%d-%H%M%S')}-{frame_index:03d}.jpg"
     return date_folder / filename
 
 

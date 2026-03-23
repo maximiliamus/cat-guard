@@ -181,6 +181,22 @@ class TestAnnotateFrameSoundLabel:
 class TestAnnotateFrameOutcomeOverlay:
     """T015 — annotate_frame() must render green/red outcome strip at the bottom."""
 
+    def test_detected_outcome_modifies_bottom_strip(self):
+        from catguard.annotation import annotate_frame
+        frame = _blank_frame(200, 300)
+        result = annotate_frame(frame, [], "Alert: Default", "detected")
+        bottom = result[170:, :]
+        bottom_orig = frame[170:, :]
+        assert not np.array_equal(bottom, bottom_orig)
+
+    def test_detected_outcome_has_neutral_pixels_in_strip(self):
+        """Neutral strip should be dark gray rather than red or green."""
+        from catguard.annotation import DETECTED_BG, annotate_frame
+        frame = _blank_frame(200, 300)
+        result = annotate_frame(frame, [], "Alert: Default", "detected")
+        pixel = tuple(int(v) for v in result[190, 280])  # far right, away from text
+        assert pixel == DETECTED_BG
+
     def test_deterred_outcome_modifies_bottom_strip(self):
         from catguard.annotation import annotate_frame
         frame = _blank_frame(200, 300)
@@ -240,17 +256,48 @@ class TestAnnotateFrameOutcomeOverlay:
         assert OUTCOME_STRIP_Y1_APPROX > 40
 
 
+class TestFormatSessionDuration:
+    """Human-readable elapsed session formatting for overlays and logs."""
+
+    def test_seconds_only_below_minute(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(30) == "30s"
+
+    def test_floor_fractional_seconds(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(15.7) == "15s"
+
+    def test_minutes_and_seconds_at_or_above_one_minute(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(135) == "2m 15s"
+
+    def test_exact_minute_keeps_zero_seconds(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(60) == "1m 0s"
+
+    def test_hours_minutes_seconds_at_or_above_one_hour(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(3765) == "1h 2m 45s"
+
+    def test_negative_values_floor_to_zero(self):
+        from catguard.annotation import format_session_duration
+        assert format_session_duration(-1) == "0s"
+
+
 # ---------------------------------------------------------------------------
 # T014: EffectivenessTracker state machine
 # ---------------------------------------------------------------------------
 
 class TestEffectivenessTrackerStateMachine:
-    """T014 — EffectivenessTracker manages pending snapshot lifecycle."""
+    """EffectivenessTracker manages session metadata and verification state."""
 
-    def _make_tracker(self, tmp_path):
+    def _make_tracker(self, tmp_path, cooldown_seconds: float = 30.0):
         from catguard.annotation import EffectivenessTracker
         from catguard.config import Settings
-        settings = Settings(tracking_directory=str(tmp_path))
+        settings = Settings(
+            tracking_directory=str(tmp_path),
+            cooldown_seconds=cooldown_seconds,
+        )
         return EffectivenessTracker(
             settings=settings,
             is_window_open=lambda: False,
@@ -261,46 +308,65 @@ class TestEffectivenessTrackerStateMachine:
         tracker = self._make_tracker(tmp_path)
         assert tracker._is_pending is False
 
-    def test_on_detection_sets_pending(self, tmp_path):
+    def test_on_detection_starts_session_and_dispatches_immediate_save(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
         frame = _blank_frame(200, 300)
-        from catguard.detection import BoundingBox
-        tracker.on_detection(frame, [BoundingBox(10, 10, 50, 50, 0.9)], "siren.wav")
-        assert tracker._is_pending is True
+        with patch("catguard.annotation._save_annotated_async") as mock_save, \
+             patch("catguard.annotation.annotate_frame", return_value=frame.copy()) as mock_ann:
+            tracker.on_detection(frame, [_make_box()], "siren.wav")
 
-    def test_on_detection_stores_frame_copy(self, tmp_path):
+        assert tracker._is_pending is True
+        assert tracker._session_start is not None
+        assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
+        assert tracker._active_sound_label == "siren.wav"
+        mock_ann.assert_called_once()
+        assert mock_ann.call_args.args[3] == "detected"
+        assert mock_save.call_count == 1
+        filepath = mock_save.call_args.kwargs["filepath"]
+        assert filepath.name.endswith("-001.jpg")
+
+    def test_on_detection_uses_annotated_copy_without_mutating_input(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
         frame = _blank_frame(200, 300)
         original_data = frame.copy()
-        from catguard.detection import BoundingBox
-        tracker.on_detection(frame, [BoundingBox(10, 10, 50, 50, 0.9)], "siren.wav")
-        # Mutate original — tracker's copy must be unaffected
-        frame[:] = 0
-        np.testing.assert_array_equal(tracker._pending_frame, original_data)
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=frame.copy()):
+            tracker.on_detection(frame, [_make_box()], "siren.wav")
+        np.testing.assert_array_equal(frame, original_data)
 
     def test_fr005a_second_detection_ignored_when_pending(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
         frame1 = _blank_frame(200, 300)
-        frame2 = np.full((200, 300, 3), 200, dtype=np.uint8)
-        from catguard.detection import BoundingBox
-        tracker.on_detection(frame1, [], "first.wav")
-        first_pending = tracker._pending_frame.copy()
-        tracker.on_detection(frame2, [], "second.wav")  # must be ignored
-        np.testing.assert_array_equal(tracker._pending_frame, first_pending)
+        with patch("catguard.annotation._save_annotated_async") as mock_save, \
+             patch("catguard.annotation.annotate_frame", return_value=frame1.copy()):
+            tracker.on_detection(frame1, [], "first.wav")
+            tracker.on_detection(np.full((200, 300, 3), 200, dtype=np.uint8), [], "second.wav")
 
-    def test_on_verification_clears_pending(self, tmp_path):
+        assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
+        assert tracker._active_sound_label == "first.wav"
+        assert mock_save.call_count == 1
+
+    def test_on_verification_clears_pending_and_keeps_session_open_when_cat_remains(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
         frame = _blank_frame(200, 300)
-        tracker.on_detection(frame, [], "Alert: Default")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=frame.copy()):
+            tracker.on_detection(frame, [], "Alert: Default")
         assert tracker._is_pending is True
-        with patch("catguard.annotation._save_annotated_async"):
-            tracker.on_verification(has_cat=False, boxes=[])
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=frame.copy()):
+            tracker.on_verification(frame.copy(), has_cat=True, boxes=[_make_box()])
+
         assert tracker._is_pending is False
+        assert tracker._session_start is not None
+        assert tracker._frame_index == 2
 
     def test_on_verification_when_not_pending_is_noop(self, tmp_path):
         """Calling on_verification without a prior on_detection must not raise."""
         tracker = self._make_tracker(tmp_path)
-        tracker.on_verification(has_cat=False, boxes=[])  # must not raise
+        tracker.on_verification(_blank_frame(), has_cat=False, boxes=[])  # must not raise
 
 
 # ---------------------------------------------------------------------------
@@ -310,7 +376,7 @@ class TestEffectivenessTrackerStateMachine:
 class TestSaveAnnotatedAsyncErrorIsolation:
     """NFR-002 — save failure must not crash the caller."""
 
-    def test_save_error_does_not_propagate(self, tmp_path):
+    def test_start_frame_save_error_does_not_propagate(self, tmp_path):
         from catguard.annotation import EffectivenessTracker
         from catguard.config import Settings
         on_error = MagicMock()
@@ -321,19 +387,12 @@ class TestSaveAnnotatedAsyncErrorIsolation:
             on_error=on_error,
         )
         frame = _blank_frame(200, 300)
-        tracker.on_detection(frame, [], "Alert: Default")
-
         # Patch save_screenshot to raise
-        import threading
-        event = threading.Event()
-        original_on_error = on_error
-
         def raising_save(*args, **kwargs):
             raise OSError("Disk full")
 
         with patch("catguard.screenshots.save_screenshot", side_effect=raising_save):
-            # on_verification dispatches async; give thread time to complete
-            tracker.on_verification(has_cat=False, boxes=[])
+            tracker.on_detection(frame, [], "Alert: Default")
             import time
             time.sleep(0.2)
 
@@ -548,7 +607,7 @@ class TestAnnotateFrameOutcomeMessage:
 # ---------------------------------------------------------------------------
 
 class TestEffectivenessTrackerSessionState:
-    """T006 (012) — session tracking state: _session_start, _cycle_count."""
+    """Session tracking state: _session_start, _cycle_count, _frame_index."""
 
     def _make_tracker(self, tmp_path, cooldown_seconds: float = 30.0):
         from catguard.annotation import EffectivenessTracker
@@ -574,130 +633,212 @@ class TestEffectivenessTrackerSessionState:
         tracker = self._make_tracker(tmp_path)
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
+        assert tracker._frame_index == 0
+        assert tracker._active_sound_label is None
 
-    def test_first_on_detection_starts_session_with_cycle_1(self, tmp_path):
+    def test_first_on_detection_starts_session_with_cycle_1_and_frame_1(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         assert tracker._session_start is not None
         assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
+        assert tracker._active_sound_label == "sound.wav"
 
     def test_on_detection_while_pending_ignored_cycle_not_incremented(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+            tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")  # ignored
         assert tracker._cycle_count == 1
-        tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")  # ignored
-        assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
+        assert tracker._active_sound_label == "sound.wav"
 
     def test_second_on_detection_after_red_increments_cycle_to_2(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         # Pending cleared, session still open — next detection increments cycle
-        tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
         assert tracker._cycle_count == 2
+        assert tracker._frame_index == 2
+        assert tracker._active_sound_label == "sound2.wav"
 
     def test_on_detection_after_green_starts_new_session(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         first_start = tracker._session_start
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=False, boxes=[])
+            tracker.on_verification(self._frame(), has_cat=False, boxes=[])
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
-        tracker.on_detection(self._frame(), self._boxes(), "sound3.wav")
+        assert tracker._frame_index == 0
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound3.wav")
         assert tracker._session_start is not None
         assert tracker._session_start != first_start
         assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
 
     def test_on_verification_red_keeps_session_open(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         saved_start = tracker._session_start
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         assert tracker._session_start == saved_start
         assert tracker._cycle_count == 1
+        assert tracker._frame_index == 2
 
     def test_on_verification_green_closes_session(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=False, boxes=[])
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_verification(self._frame(), has_cat=False, boxes=[])
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
+        assert tracker._frame_index == 0
+        assert tracker._active_sound_label is None
 
     def test_on_verification_noop_when_no_pending_and_no_session(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
         with patch("catguard.annotation._save_annotated_async") as mock_save:
-            tracker.on_verification(has_cat=True, boxes=[])
+            tracker.on_verification(self._frame(), has_cat=True, boxes=[])
         mock_save.assert_not_called()
 
     def test_elapsed_time_label_cycle1_equals_cooldown(self, tmp_path):
-        """elapsed_s for cycle 1 = int(1 * cooldown_seconds)."""
+        """elapsed_s for cycle 1 = int(1 * cooldown_seconds), then formatted."""
         tracker = self._make_tracker(tmp_path, cooldown_seconds=30.0)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()) as mock_ann:
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         msg = mock_ann.call_args.kwargs.get("outcome_message")
         assert msg == "Cat remained after alert: 30s", f"Got: {msg!r}"
 
     def test_elapsed_time_label_cycle2_equals_double_cooldown(self, tmp_path):
-        """elapsed_s for cycle 2 = int(2 * cooldown_seconds)."""
+        """Cycle 2 duration uses human-readable formatting rather than raw seconds."""
         tracker = self._make_tracker(tmp_path, cooldown_seconds=30.0)
         # Cycle 1
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         # Cycle 2
-        tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()) as mock_ann:
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         msg = mock_ann.call_args.kwargs.get("outcome_message")
-        assert msg == "Cat remained after alert: 60s", f"Got: {msg!r}"
+        assert msg == "Cat remained after alert: 1m 0s", f"Got: {msg!r}"
 
     def test_green_label_shows_elapsed_time(self, tmp_path):
         """Green outcome uses 'Cat disappeared after alert: Ns'."""
         tracker = self._make_tracker(tmp_path, cooldown_seconds=15.0)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()) as mock_ann:
-            tracker.on_verification(has_cat=False, boxes=[])
+            tracker.on_verification(self._frame(), has_cat=False, boxes=[])
         msg = mock_ann.call_args.kwargs.get("outcome_message")
         assert msg == "Cat disappeared after alert: 15s", f"Got: {msg!r}"
 
     def test_session_filepath_uses_session_start_not_now(self, tmp_path):
         """Filepath derives date from _session_start, not datetime.now()."""
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         session_start = tracker._session_start
         with patch("catguard.annotation._save_annotated_async") as mock_save, \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         filepath = mock_save.call_args.kwargs.get("filepath")
         assert filepath is not None
         expected_date = session_start.strftime("%Y-%m-%d")
         expected_prefix = session_start.strftime("%Y%m%d-%H%M%S")
         assert filepath.parent.name == expected_date
         assert filepath.name.startswith(expected_prefix)
-        assert filepath.name.endswith("-001.jpg")
+        assert filepath.name.endswith("-002.jpg")
 
     def test_int_truncation_for_fractional_cooldown(self, tmp_path):
         """int() truncates: 15.7 s cooldown → cycle 1 shows '15s' not '15.7s'."""
         tracker = self._make_tracker(tmp_path, cooldown_seconds=15.7)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()) as mock_ann:
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         msg = mock_ann.call_args.kwargs.get("outcome_message")
         assert msg == "Cat remained after alert: 15s", f"Got: {msg!r}"
+
+
+class TestEffectivenessTrackerLogging:
+    """Session lifecycle logs use human-readable elapsed durations."""
+
+    def _make_tracker(self, tmp_path, cooldown_seconds: float = 30.0):
+        from catguard.annotation import EffectivenessTracker
+        from catguard.config import Settings
+        settings = Settings(
+            tracking_directory=str(tmp_path),
+            cooldown_seconds=cooldown_seconds,
+        )
+        return EffectivenessTracker(
+            settings=settings,
+            is_window_open=lambda: False,
+            on_error=MagicMock(),
+        )
+
+    def _frame(self):
+        return np.full((100, 200, 3), 128, dtype=np.uint8)
+
+    def test_logs_human_readable_elapsed_time_for_remained_outcome(self, tmp_path, caplog):
+        tracker = self._make_tracker(tmp_path, cooldown_seconds=135.0)
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), [_make_box()], "sound.wav")
+            with caplog.at_level("INFO"):
+                tracker.on_verification(self._frame(), has_cat=True, boxes=[_make_box()])
+
+        assert "2m 15s" in caplog.text
+        assert "135s" not in caplog.text
+
+    def test_logs_human_readable_elapsed_time_when_session_closes(self, tmp_path, caplog):
+        tracker = self._make_tracker(tmp_path, cooldown_seconds=3765.0)
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), [_make_box()], "sound.wav")
+            with caplog.at_level("INFO"):
+                tracker.on_verification(self._frame(), has_cat=False, boxes=[])
+
+        assert "1h 2m 45s" in caplog.text
+        assert "3765s" not in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -726,15 +867,17 @@ class TestEffectivenessTrackerAbandon:
 
     def test_abandon_during_active_session_resets_all_fields(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         assert tracker._session_start is not None
-        assert tracker._pending_frame is not None
+        assert tracker._is_pending is True
         tracker.abandon()
-        assert tracker._pending_frame is None
-        assert tracker._pending_boxes == []
-        assert tracker._pending_sound is None
+        assert tracker._is_pending is False
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
+        assert tracker._frame_index == 0
+        assert tracker._active_sound_label is None
 
     def test_abandon_when_no_session_is_noop(self, tmp_path):
         """abandon() with no active session must not raise."""
@@ -742,25 +885,47 @@ class TestEffectivenessTrackerAbandon:
         tracker.abandon()  # must not raise
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
+        assert tracker._frame_index == 0
+        assert tracker._active_sound_label is None
 
     def test_on_detection_after_abandon_starts_fresh_session(self, tmp_path):
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         tracker.abandon()
-        tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound2.wav")
         assert tracker._session_start is not None
         assert tracker._cycle_count == 1
+        assert tracker._frame_index == 1
+        assert tracker._active_sound_label == "sound2.wav"
 
     def test_abandon_between_cycles_resets_session(self, tmp_path):
         """abandon() called between cycles (pending cleared, session open) resets."""
         tracker = self._make_tracker(tmp_path)
-        tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
-        # Simulate red verification (clears pending, keeps session open)
         with patch("catguard.annotation._save_annotated_async"), \
              patch("catguard.annotation.annotate_frame", return_value=self._frame()):
-            tracker.on_verification(has_cat=True, boxes=self._boxes())
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        # Simulate red verification (clears pending, keeps session open).
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_verification(self._frame(), has_cat=True, boxes=self._boxes())
         assert tracker._session_start is not None
-        assert tracker._pending_frame is None
+        assert tracker._is_pending is False
         tracker.abandon()
         assert tracker._session_start is None
         assert tracker._cycle_count == 0
+        assert tracker._frame_index == 0
+
+    def test_abandon_does_not_remove_already_saved_files(self, tmp_path):
+        tracker = self._make_tracker(tmp_path)
+        existing = tmp_path / "2026-03-23" / "20260323-101500-001.jpg"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"jpeg")
+        with patch("catguard.annotation._save_annotated_async"), \
+             patch("catguard.annotation.annotate_frame", return_value=self._frame()):
+            tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
+        tracker.abandon()
+        assert existing.exists()

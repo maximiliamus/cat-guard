@@ -326,6 +326,20 @@ class TestBuildSessionFilepath:
         result = build_session_filepath(tmp_path, session_ts, 1000)
         assert result.name == "20260322-143000-1000.jpg"
 
+    def test_zero_frame_index_rejected(self, tmp_path):
+        """Saved-frame indices are 1-based; zero is invalid."""
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        with pytest.raises(ValueError):
+            build_session_filepath(tmp_path, session_ts, 0)
+
+    def test_negative_frame_index_rejected(self, tmp_path):
+        """Saved-frame indices must stay positive within a session timeline."""
+        from catguard.screenshots import build_session_filepath
+        session_ts = datetime(2026, 3, 22, 14, 30, 0)
+        with pytest.raises(ValueError):
+            build_session_filepath(tmp_path, session_ts, -1)
+
 
 # ---------------------------------------------------------------------------
 # T002 (012): save_screenshot with explicit filepath

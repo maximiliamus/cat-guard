@@ -388,6 +388,31 @@ class TestOneEventPerFrame:
 class TestVerificationCallback:
     """T016 — set_verification_callback() registers callback; trigger fires correctly."""
 
+    def _run_with_camera_frames(self, loop, frames, boxes_per_frame):
+        import numpy as _np
+
+        call_count = [0]
+
+        def read_side_effect():
+            idx = call_count[0]
+            call_count[0] += 1
+            if idx < len(frames):
+                return True, frames[idx]
+            loop._stop_event.set()
+            return False, None
+
+        with patch("cv2.VideoCapture") as mock_cap_cls:
+            mock_cap = MagicMock()
+            mock_cap.isOpened.return_value = True
+            mock_cap.read.side_effect = read_side_effect
+            mock_cap_cls.return_value = mock_cap
+            loop._model = MagicMock()
+            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
+            with patch.object(loop, "_load_model"):
+                with patch("catguard.detection._preprocess_frame", return_value=_np.zeros((1, 3, 640, 640), dtype=_np.float32)):
+                    with patch("catguard.detection._postprocess", side_effect=boxes_per_frame):
+                        loop._run()
+
     def test_set_verification_callback_attribute_exists(self):
         loop = DetectionLoop(Settings(), MagicMock())
         assert hasattr(loop, "set_verification_callback")
@@ -405,45 +430,18 @@ class TestVerificationCallback:
         loop.set_verification_callback(None)
         assert loop._verification_callback is None
 
-    def test_pending_frame_set_after_sound_played(self):
-        """After a SOUND_PLAYED event, _pending_frame must be set."""
+    def test_verification_pending_set_after_sound_played(self):
+        """After a SOUND_PLAYED event, verification should be pending."""
         import numpy as _np
         from catguard.detection import BoundingBox
 
-        received = {}
-
-        def cb(event):
-            if event.action == DetectionAction.SOUND_PLAYED:
-                received["loop"] = event
-
-        settings = Settings()
-        loop = DetectionLoop(settings, cb)
-
-        call_count = [0]
-
-        def read_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return True, _np.zeros((100, 200, 3), dtype=_np.uint8)
-            loop._stop_event.set()
-            return False, None
-
-        with patch("cv2.VideoCapture") as mock_cap_cls:
-            mock_cap = MagicMock()
-            mock_cap.isOpened.return_value = True
-            mock_cap.read.side_effect = read_side_effect
-            mock_cap_cls.return_value = mock_cap
-            loop._model = MagicMock()
-            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
-            with patch.object(loop, "_load_model"):
-                with patch("catguard.detection._postprocess",
-                           return_value=[BoundingBox(5, 5, 50, 50, 0.9)]):
-                    loop._run()
-
-        # After SOUND_PLAYED, _pending_frame must have been set (then cleared by
-        # the verification trigger only if cooldown elapsed again — here it won't
-        # have elapsed after only one frame, so pending should still be set).
-        assert loop._pending_frame is not None
+        loop = DetectionLoop(Settings(cooldown_seconds=60.0), MagicMock())
+        self._run_with_camera_frames(
+            loop,
+            [_np.zeros((100, 200, 3), dtype=_np.uint8)],
+            [[BoundingBox(5, 5, 50, 50, 0.9)]],
+        )
+        assert loop._verification_pending is True
 
     def test_verification_callback_fires_after_cooldown(self):
         """Verification callback is invoked on first post-cooldown frame."""
@@ -455,75 +453,63 @@ class TestVerificationCallback:
         settings = Settings(cooldown_seconds=1.0)
         loop = DetectionLoop(settings, detect_callback)
         loop.set_verification_callback(
-            lambda has_cat, boxes: verification_calls.append((has_cat, boxes))
+            lambda frame_bgr, has_cat, boxes: verification_calls.append((frame_bgr, has_cat, boxes))
         )
 
-        # Pre-set a pending frame as if SOUND_PLAYED already fired.
-        loop._pending_frame = _np.zeros((100, 200, 3), dtype=_np.uint8)
-        # Pre-set _last_alert_time far in the past so cooldown is elapsed.
+        loop._verification_pending = True
         loop._last_alert_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+        live_frame = _np.zeros((100, 200, 3), dtype=_np.uint8)
 
-        call_count = [0]
-
-        def read_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return True, _np.zeros((100, 200, 3), dtype=_np.uint8)
-            loop._stop_event.set()
-            return False, None
-
-        with patch("cv2.VideoCapture") as mock_cap_cls:
-            mock_cap = MagicMock()
-            mock_cap.isOpened.return_value = True
-            mock_cap.read.side_effect = read_side_effect
-            mock_cap_cls.return_value = mock_cap
-            loop._model = MagicMock()
-            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
-            with patch.object(loop, "_load_model"):
-                loop._run()
+        self._run_with_camera_frames(loop, [live_frame], [[]])
 
         assert len(verification_calls) == 1
-        has_cat, boxes = verification_calls[0]
+        frame_bgr, has_cat, boxes = verification_calls[0]
+        assert isinstance(frame_bgr, _np.ndarray)
         assert has_cat is False
         assert boxes == []
 
-    def test_pending_frame_cleared_before_callback(self):
-        """_pending_frame must be None by the time the callback is invoked."""
+    def test_pending_flag_cleared_before_callback(self):
+        """Pending state must be cleared before the callback is invoked."""
         import numpy as _np
         from datetime import timedelta
 
         pending_during_callback = []
 
-        def capture_pending_cb(has_cat, boxes):
-            pending_during_callback.append(loop._pending_frame)
+        def capture_pending_cb(frame_bgr, has_cat, boxes):
+            pending_during_callback.append(loop._verification_pending)
 
         settings = Settings(cooldown_seconds=1.0)
         loop = DetectionLoop(settings, MagicMock())
         loop.set_verification_callback(capture_pending_cb)
-        loop._pending_frame = _np.zeros((100, 200, 3), dtype=_np.uint8)
+        loop._verification_pending = True
         loop._last_alert_time = datetime.now(timezone.utc) - timedelta(seconds=60)
 
-        call_count = [0]
-
-        def read_side_effect():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return True, _np.zeros((100, 200, 3), dtype=_np.uint8)
-            loop._stop_event.set()
-            return False, None
-
-        with patch("cv2.VideoCapture") as mock_cap_cls:
-            mock_cap = MagicMock()
-            mock_cap.isOpened.return_value = True
-            mock_cap.read.side_effect = read_side_effect
-            mock_cap_cls.return_value = mock_cap
-            loop._model = MagicMock()
-            loop._model.run.return_value = [_np.zeros((1, 84, 8400), dtype=_np.float32)]
-            with patch.object(loop, "_load_model"):
-                loop._run()
+        self._run_with_camera_frames(loop, [_np.zeros((100, 200, 3), dtype=_np.uint8)], [[]])
 
         assert len(pending_during_callback) == 1
-        assert pending_during_callback[0] is None
+        assert pending_during_callback[0] is False
+
+    def test_verification_callback_receives_deep_copied_live_frame(self):
+        """Callback frame must remain valid after the loop advances the camera buffer."""
+        import numpy as _np
+        from datetime import timedelta
+
+        received_frames = []
+        settings = Settings(cooldown_seconds=1.0)
+        loop = DetectionLoop(settings, MagicMock())
+        loop.set_verification_callback(
+            lambda frame_bgr, has_cat, boxes: received_frames.append(frame_bgr)
+        )
+        loop._verification_pending = True
+        loop._last_alert_time = datetime.now(timezone.utc) - timedelta(seconds=60)
+
+        live_frame = _np.zeros((100, 200, 3), dtype=_np.uint8)
+        self._run_with_camera_frames(loop, [live_frame], [[]])
+        live_frame[:] = 255
+
+        assert len(received_frames) == 1
+        assert received_frames[0] is not live_frame
+        assert int(received_frames[0][0, 0, 0]) == 0
 
 
 class TestPauseResume:
@@ -533,12 +519,14 @@ class TestPauseResume:
         """Test that pause() stops the tracking loop (T011)."""
         loop = DetectionLoop(Settings(), MagicMock())
         loop._is_tracking = True
+        loop._verification_pending = True
         
         result = loop.pause()
         
         assert result is True
         assert loop._is_tracking is False
         assert loop._stop_event.is_set()
+        assert loop._verification_pending is False
 
     def test_pause_idempotent_already_paused(self):
         """Test that pause() is idempotent when already paused."""
