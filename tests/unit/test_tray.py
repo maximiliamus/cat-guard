@@ -93,11 +93,13 @@ class TestMenuItems:
             # Should contain a Live View item
             assert any("Live View" in str(item) for item in captured_items)
     def test_menu_order_settings_open_exit(self):
-        """Menu order must be Live View, Settings, Separator, Pause/Continue, Separator, Exit."""
+        """Menu order must keep directory shortcuts grouped before Exit."""
         root = MagicMock()
         stop_event = threading.Event()
         settings = Settings()
         on_save = MagicMock()
+        detection_loop = MagicMock()
+        detection_loop.is_tracking.return_value = True
 
         with patch("catguard.tray.pystray") as mock_pystray:
             mock_pystray.Icon.return_value = MagicMock()
@@ -112,16 +114,21 @@ class TestMenuItems:
             mock_pystray.Menu.SEPARATOR = "SEPARATOR"
             mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
 
-            build_tray_icon(root, stop_event, settings, on_save, MagicMock())
+            build_tray_icon(root, stop_event, settings, on_save, detection_loop)
 
             labels = [str(item) for item in captured_items]
-            # Check that separators are present
-            assert "SEPARATOR" in labels
-            # Check order: Live View should be before Pause/Continue
-            open_idx = next((i for i, l in enumerate(labels) if "Live View" in l), None)
-            exit_idx = next((i for i, l in enumerate(labels) if "Exit" in l), None)
-            assert open_idx is not None and exit_idx is not None
-            assert open_idx < exit_idx
+            assert labels == [
+                "Live View",
+                "Logs",
+                "Settings…",
+                "SEPARATOR",
+                "Pause",
+                "SEPARATOR",
+                "Tracking Directory",
+                "Photos Directory",
+                "SEPARATOR",
+                "Exit",
+            ]
 
 
 
@@ -278,9 +285,19 @@ class TestMenuStructure:
             # Extract labels in order
             labels = [item.get("label") if isinstance(item, dict) else str(item) 
                      for item in menu_items]
-            
-            # Should have separators at positions 2 and 4
-            assert "SEPARATOR" in labels
+
+            assert labels == [
+                "Live View",
+                "Logs",
+                "Settings…",
+                "SEPARATOR",
+                "Pause",
+                "SEPARATOR",
+                "Tracking Directory",
+                "Photos Directory",
+                "SEPARATOR",
+                "Exit",
+            ]
 
     def test_menu_pause_label_when_tracking(self):
         """Test that menu shows 'Pause' label when tracking (T037)."""
@@ -419,4 +436,96 @@ class TestLogsMenuItem:
         assert any("Logs" in str(item) for item in captured_items), (
             f"'Logs' not found in update_tray_menu items: {captured_items}"
         )
+
+
+class TestDirectoryMenuItems:
+    def test_build_tray_icon_includes_directory_items(self):
+        items = _capture_tray_items()
+        assert "Tracking Directory" in items
+        assert "Photos Directory" in items
+
+    def test_update_tray_menu_includes_directory_items(self):
+        from catguard.tray import update_tray_menu
+
+        root = MagicMock()
+        detection_loop = MagicMock()
+        detection_loop.is_tracking.return_value = True
+        settings = Settings()
+        on_save = MagicMock()
+        captured_items = []
+
+        with patch("catguard.tray.pystray") as mock_pystray:
+            mock_icon = MagicMock()
+
+            def capture_menu(*items):
+                captured_items.extend(items)
+                return MagicMock()
+
+            mock_pystray.Menu = capture_menu
+            mock_pystray.Menu.SEPARATOR = "SEPARATOR"
+            mock_pystray.MenuItem = MagicMock(side_effect=lambda label, *a, **kw: label)
+
+            update_tray_menu(
+                mock_icon, True, root, settings, on_save,
+                detection_loop, None,
+            )
+
+        assert "Tracking Directory" in captured_items
+        assert "Photos Directory" in captured_items
+
+
+class TestOpenDirectory:
+    def test_resolve_directory_path_trims_whitespace(self, tmp_path, monkeypatch):
+        from catguard.tray import _resolve_directory_path
+
+        monkeypatch.chdir(tmp_path)
+
+        resolved = _resolve_directory_path("  tracking-folder  ")
+
+        assert resolved == (tmp_path / "tracking-folder").resolve()
+
+    def test_resolve_directory_path_raises_for_empty_value(self):
+        from catguard.tray import _resolve_directory_path
+
+        with pytest.raises(ValueError, match="directory path is empty"):
+            _resolve_directory_path("   ")
+
+    def test_windows_uses_startfile(self, tmp_path):
+        from catguard.tray import _open_directory
+
+        with patch("catguard.tray.platform.system", return_value="Windows"), \
+             patch("os.startfile", create=True) as mock_start:
+            _open_directory(tmp_path)
+
+        mock_start.assert_called_once_with(str(tmp_path))
+
+    def test_macos_uses_open(self, tmp_path):
+        from catguard.tray import _open_directory
+
+        with patch("catguard.tray.platform.system", return_value="Darwin"), \
+             patch("catguard.tray.subprocess.run") as mock_run:
+            _open_directory(tmp_path)
+
+        mock_run.assert_called_once_with(["open", str(tmp_path)], check=False)
+
+    def test_linux_uses_xdg_open(self, tmp_path):
+        from catguard.tray import _open_directory
+
+        with patch("catguard.tray.platform.system", return_value="Linux"), \
+             patch("catguard.tray.subprocess.run") as mock_run:
+            _open_directory(tmp_path)
+
+        mock_run.assert_called_once_with(["xdg-open", str(tmp_path)], check=False)
+
+    def test_creates_folder_if_missing(self, tmp_path):
+        from catguard.tray import _open_directory
+
+        folder = tmp_path / "missing"
+        assert not folder.exists()
+
+        with patch("catguard.tray.platform.system", return_value="Linux"), \
+             patch("catguard.tray.subprocess.run"):
+            _open_directory(folder)
+
+        assert folder.exists()
 
