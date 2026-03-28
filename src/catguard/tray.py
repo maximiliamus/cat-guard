@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 import platform
+import subprocess
 import threading
 from pathlib import Path
 from typing import Callable
@@ -35,6 +36,42 @@ _ICON_ICO_PATH = _assets_root() / "assets" / "icon.ico"
 # Pause/Continue tracking state colors (T024)
 TRACKING_ACTIVE_COLOR = (0, 255, 0)  # Bright green RGB
 TRACKING_PAUSED_COLOR = None  # System default (no recolor)
+
+
+def _resolve_directory_path(path: str | Path) -> Path:
+    """Return a normalized absolute directory path from a configured value."""
+    raw_path = str(path).strip()
+    if not raw_path:
+        raise ValueError("directory path is empty")
+
+    directory = Path(raw_path).expanduser()
+    if not directory.is_absolute():
+        directory = directory.resolve()
+    return directory
+
+
+def _open_directory(path: str | Path) -> None:
+    """Create *path* if needed and open it in the platform file manager."""
+    directory = _resolve_directory_path(path)
+    directory.mkdir(parents=True, exist_ok=True)
+
+    system = platform.system()
+    logger.info("Opening directory: %s (platform=%s)", directory, system)
+    if system == "Windows":
+        os.startfile(str(directory))  # type: ignore[attr-defined]
+    elif system == "Darwin":
+        subprocess.run(["open", str(directory)], check=False)
+    else:
+        subprocess.run(["xdg-open", str(directory)], check=False)
+
+
+def _open_directory_handler(icon: pystray.Icon, path: str | Path, label: str) -> None:
+    """Open a configured directory and surface failures as tray notifications."""
+    try:
+        _open_directory(path)
+    except Exception as exc:
+        logger.error("Failed to open %s: %s", label, exc)
+        notify_error(icon, f"Failed to open {label}: {exc}")
 
 
 def _ensure_main_window(root, detection_loop) -> None:
@@ -102,6 +139,12 @@ def build_tray_icon(
     def on_exit_clicked(icon, item):
         _on_exit(icon, root, stop_event)
 
+    def on_open_tracking_directory_clicked(icon, item):
+        _open_directory_handler(icon, settings.tracking_directory, "tracking directory")
+
+    def on_open_photos_directory_clicked(icon, item):
+        _open_directory_handler(icon, settings.photos_directory, "photos directory")
+
     def on_pause_continue_clicked(icon, item):
         """Handle pause/continue menu item click."""
         is_tracking = detection_loop.is_tracking()
@@ -138,6 +181,9 @@ def build_tray_icon(
         pystray.MenuItem("Settings\u2026", on_settings_clicked),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(pause_label, on_pause_continue_clicked),
+        pystray.Menu.SEPARATOR,
+        pystray.MenuItem("Tracking Directory", on_open_tracking_directory_clicked),
+        pystray.MenuItem("Photos Directory", on_open_photos_directory_clicked),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Exit", on_exit_clicked),
     )
@@ -196,6 +242,12 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
             stop_event = getattr(root, "_stop_event", threading.Event())
             _on_exit(icon, root, stop_event)
 
+        def on_open_tracking_directory_clicked(icon, item):
+            _open_directory_handler(icon, settings.tracking_directory, "tracking directory")
+
+        def on_open_photos_directory_clicked(icon, item):
+            _open_directory_handler(icon, settings.photos_directory, "photos directory")
+
         def on_pause_continue_clicked(icon, item):
             """Handle pause/continue menu item click."""
             if is_tracking:
@@ -231,6 +283,9 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
             pystray.MenuItem("Settings\u2026", on_settings_clicked),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(pause_label, on_pause_continue_clicked),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Tracking Directory", on_open_tracking_directory_clicked),
+            pystray.MenuItem("Photos Directory", on_open_photos_directory_clicked),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", on_exit_clicked),
         )
