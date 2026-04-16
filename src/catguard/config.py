@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(user_config_dir("CatGuard"))
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
+_TRACKING_MODES = frozenset({"screenshots", "videoclips"})
 
 
 def _default_models_directory() -> str:
@@ -136,6 +137,15 @@ class Settings(BaseModel):
         default_factory=_default_tracking_directory,
         description="Directory where tracking screenshots are saved. Defaults to system Pictures directory.",
     )
+    tracking_mode: str = Field(
+        default="screenshots",
+        description="Tracking artifact mode: 'screenshots' or 'videoclips'.",
+    )
+    videoclip_fps: int = Field(
+        default=1,
+        gt=0,
+        description="Frames per second written to tracking video clips when tracking_mode='videoclips'.",
+    )
     photo_image_format: str = Field(
         default="jpg",
         description="Image format for saved photos (currently 'jpg' only; future: 'png', 'webp').",
@@ -200,6 +210,50 @@ class Settings(BaseModel):
         if ".." in path:
             raise ValueError(f"tracking_directory must not contain '..' (got {path!r})")
         return path
+
+    @field_validator("tracking_mode", mode="before")
+    @classmethod
+    def validate_tracking_mode(cls, value: object) -> str:
+        """Accept only the persisted tracking output modes."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in _TRACKING_MODES:
+                return normalized
+        logger.warning(
+            "Invalid tracking_mode value (%r) — resetting to 'screenshots'.",
+            value,
+        )
+        return "screenshots"
+
+    @field_validator("videoclip_fps", mode="before")
+    @classmethod
+    def validate_videoclip_fps(cls, value: object) -> int:
+        """Accept positive whole numbers and sanitize invalid values to 1."""
+        if isinstance(value, bool):
+            logger.warning(
+                "Invalid videoclip_fps value (%r) — resetting to 1.",
+                value,
+            )
+            return 1
+
+        if isinstance(value, int):
+            if value > 0:
+                return value
+        elif isinstance(value, float):
+            if value.is_integer() and value > 0:
+                return int(value)
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                parsed = int(stripped)
+                if parsed > 0:
+                    return parsed
+
+        logger.warning(
+            "Invalid videoclip_fps value (%r) — resetting to 1.",
+            value,
+        )
+        return 1
 
     @field_validator("logs_directory")
     @classmethod

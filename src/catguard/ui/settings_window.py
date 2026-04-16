@@ -36,6 +36,8 @@ class SettingsFormModel:
     # Tracking fields (T013 / T023 / 008)
     models_directory: str = field(default_factory=_default_models_directory)
     tracking_directory: str = field(default_factory=_default_tracking_directory)
+    tracking_mode: str = "screenshots"
+    videoclip_fps: int = 1
     photos_directory: str = field(default_factory=_default_photos_directory)
     photo_countdown_seconds: int = 3
     # Audio playback fields (T004)
@@ -67,6 +69,8 @@ class SettingsFormModel:
             autostart=s.autostart,
             models_directory=s.models_directory,
             tracking_directory=s.tracking_directory,
+            tracking_mode=s.tracking_mode,
+            videoclip_fps=s.videoclip_fps,
             photos_directory=s.photos_directory,
             photo_countdown_seconds=s.photo_countdown_seconds,
             use_default_sound=s.use_default_sound,
@@ -95,6 +99,8 @@ class SettingsFormModel:
             autostart=self.autostart,
             models_directory=self.models_directory,
             tracking_directory=self.tracking_directory,
+            tracking_mode=self.tracking_mode,
+            videoclip_fps=self.videoclip_fps,
             photos_directory=self.photos_directory,
             photo_countdown_seconds=self.photo_countdown_seconds,
             use_default_sound=self.use_default_sound,
@@ -127,6 +133,11 @@ class SettingsFormModel:
 # ---------------------------------------------------------------------------
 
 _FORBIDDEN_STEM_CHARS: frozenset[str] = frozenset(r'\/:*?"<>|')
+
+
+def _is_videoclip_fps_enabled(tracking_mode: str) -> bool:
+    """Return True only when the saved tracking mode is videoclip output."""
+    return str(tracking_mode).strip().lower() == "videoclips"
 
 
 def _validate_rename_stem(new_stem: str) -> str | None:
@@ -293,7 +304,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     threshold_label.pack(side="left", padx=(4, 0))
 
     # ---- Cooldown -------------------------------------------------------
-    tk.Label(tab_detection, text="Cooldown (seconds):").grid(row=2, column=0, sticky="e", **pad)
+    tk.Label(tab_detection, text="Cooldown (sec):").grid(row=2, column=0, sticky="e", **pad)
     cool_var = tk.DoubleVar(value=model.cooldown_seconds)
     tk.Spinbox(tab_detection, from_=1.0, to=300.0, increment=1.0, textvariable=cool_var, width=8, format="%.0f").grid(row=2, column=1, sticky="w", **pad)
 
@@ -763,7 +774,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     # ==== Storage tab ====================================================
 
     # ---- Tracking directory ---------------------------------------------
-    tk.Label(tab_storage, text="Tracking directory:").grid(row=0, column=0, sticky="w", **pad)
+    tk.Label(tab_storage, text="Tracking directory:").grid(row=0, column=0, sticky="e", **pad)
     folder_var = tk.StringVar(value=model.tracking_directory)
     ss_folder_frame = tk.Frame(tab_storage)
     ss_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
@@ -781,11 +792,43 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tk.Button(ss_folder_frame, text="Browse\u2026", command=_browse_folder).pack(side="right", padx=(4, 2))
     tk.Entry(ss_folder_frame, textvariable=folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
+    # ---- Tracking output mode ------------------------------------------
+    tk.Label(tab_storage, text="Tracking mode:").grid(row=1, column=0, sticky="e", **pad)
+    tracking_mode_var = tk.StringVar(value=model.tracking_mode)
+    tracking_mode_frame = tk.Frame(tab_storage)
+    tracking_mode_frame.grid(row=1, column=1, sticky="w", **pad)
+    tk.Radiobutton(
+        tracking_mode_frame,
+        text="Screenshots",
+        variable=tracking_mode_var,
+        value="screenshots",
+    ).pack(side="left")
+    tk.Radiobutton(
+        tracking_mode_frame,
+        text="Videoclips",
+        variable=tracking_mode_var,
+        value="videoclips",
+    ).pack(side="left", padx=(8, 0))
+
+    # ---- Videoclip FPS --------------------------------------------------
+    tk.Label(tab_storage, text="Videoclip FPS:").grid(row=2, column=0, sticky="e", **pad)
+    videoclip_fps_var = tk.StringVar(value=str(model.videoclip_fps))
+    videoclip_fps_entry = tk.Entry(tab_storage, textvariable=videoclip_fps_var, width=8)
+    videoclip_fps_entry.grid(row=2, column=1, sticky="w", **pad)
+
+    def _update_videoclip_fps_state(*_):
+        videoclip_fps_entry.config(
+            state="normal" if _is_videoclip_fps_enabled(tracking_mode_var.get()) else "disabled"
+        )
+
+    tracking_mode_var.trace_add("write", _update_videoclip_fps_state)
+    _update_videoclip_fps_state()
+
     # ---- Photos directory -----------------------------------------------
-    tk.Label(tab_storage, text="Photos directory:").grid(row=1, column=0, sticky="w", **pad)
+    tk.Label(tab_storage, text="Photos directory:").grid(row=3, column=0, sticky="e", **pad)
     photos_folder_var = tk.StringVar(value=model.photos_directory)
     photos_folder_frame = tk.Frame(tab_storage)
-    photos_folder_frame.grid(row=1, column=1, sticky="ew", **pad)
+    photos_folder_frame.grid(row=3, column=1, sticky="ew", **pad)
 
     def _browse_photos_folder():
         chosen = filedialog.askdirectory(
@@ -910,7 +953,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tk.Label(tab_logs, text="Trim batch size:").grid(row=2, column=0, sticky="w", **pad)
     tk.Spinbox(tab_logs, from_=205, to=100_000, textvariable=batch_size_var, width=10).grid(row=2, column=1, sticky="w", **pad)
 
-    tk.Label(tab_logs, text="Auto-refresh interval (s):").grid(row=3, column=0, sticky="w", **pad)
+    tk.Label(tab_logs, text="Auto-refresh interval (sec):").grid(row=3, column=0, sticky="w", **pad)
     tk.Spinbox(tab_logs, from_=1, to=3600, textvariable=auto_refresh_interval_var, width=10).grid(row=3, column=1, sticky="w", **pad)
 
     def _save():
@@ -929,6 +972,12 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.autostart = new_autostart
         model.models_directory = models_folder_var.get()
         model.tracking_directory = folder_var.get()
+        model.tracking_mode = tracking_mode_var.get()
+        fps_value = videoclip_fps_var.get().strip()
+        if fps_value.isdigit():
+            model.videoclip_fps = int(fps_value)
+        else:
+            model.videoclip_fps = fps_value  # sanitized by Settings validator on save
         model.photos_directory = photos_folder_var.get()
         model.photo_countdown_seconds = photo_countdown_var.get()
         # T016: persist audio playback settings

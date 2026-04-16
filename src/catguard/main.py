@@ -12,6 +12,7 @@ import platform
 import signal
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -172,6 +173,40 @@ def _make_on_wake_callback(
 
     return on_wake
 
+
+def shutdown_app(
+    *,
+    reason: str,
+    tracker,
+    time_window_monitor,
+    sleep_watcher,
+    detection_loop,
+    shutdown_audio,
+    stop_event,
+    exit_process: bool,
+    state: dict[str, bool] | None = None,
+    exit_code: int = 0,
+    deadline_seconds: float = 10.0,
+) -> None:
+    """Finalize the active tracking session and stop all runtime services once."""
+    shutdown_state = state if state is not None else {}
+    if shutdown_state.get("done"):
+        logger.info("shutdown_app: already completed; skipping duplicate request.")
+        return
+    shutdown_state["done"] = True
+
+    deadline = time.monotonic() + deadline_seconds
+    logger.info("event=app_shutdown_started reason=%s deadline_seconds=%.2f", reason, deadline_seconds)
+    tracker.abandon(reason=reason, deadline_monotonic=deadline)
+    time_window_monitor.stop()
+    sleep_watcher.stop()
+    detection_loop.stop()
+    shutdown_audio()
+    stop_event.set()
+    logger.info("event=app_shutdown_completed reason=%s", reason)
+    if exit_process:
+        raise SystemExit(exit_code)
+
 def main() -> None:
     """Main entry point. Initializes all subsystems and starts the event loop."""
     import tkinter as tk
@@ -273,6 +308,7 @@ def main() -> None:
         settings=settings,
         is_window_open=lambda: getattr(root, "_main_window_visible", False),
         on_error=_on_screenshot_error,
+        detection_snapshot_getter=lambda: detection_loop.get_latest_detection_snapshot(),
     )
 
     def on_cat_detected(event: DetectionEvent) -> None:
@@ -280,7 +316,12 @@ def main() -> None:
             logger.debug("on_cat_detected: suppressed — recording in progress.")
             return
         sound_label = play_alert(settings, default_sound)
-        tracker.on_detection(event.frame_bgr, event.boxes, sound_label)
+        tracker.on_detection(
+            event.frame_bgr,
+            event.boxes,
+            sound_label,
+            captured_at=event.captured_at,
+        )
 
         # Show alert label on main window while sound is playing, then clear it.
         def _apply_label(label) -> None:
@@ -300,7 +341,7 @@ def main() -> None:
     # Set up camera error callback (T041)
     def on_camera_error(error_msg: str) -> None:
         """Handle camera errors by showing notification via tray."""
-        tracker.abandon()  # camera error = pause → abandon active session (FR-010)
+        tracker.abandon(reason="camera_error")  # camera error = pause → abandon active session (FR-010)
         icon = getattr(root, "_tray_icon", None)
         if icon is not None:
             notify_error(icon, f"Camera error: {error_msg}")
@@ -334,7 +375,7 @@ def main() -> None:
         """Called by TimeWindowMonitor and tray state callbacks."""
         _was_tracking[0] = is_tracking
         if not is_tracking:
-            tracker.abandon()  # any pause abandons the active session (FR-010)
+            tracker.abandon(reason="tracking_paused")  # any pause abandons the active session (FR-010)
         win = getattr(root, "_main_window", None)
         if win is not None:
             if not is_tracking:
@@ -395,16 +436,20 @@ def main() -> None:
     root.minimize_to_tray = minimize_to_tray
     root.settings = settings
     root._default_sound_path = default_sound
+    shutdown_state: dict[str, bool] = {}
 
     def on_shutdown(*_args) -> None:
-        logger.info("Shutting down CatGuard…")
-        tracker.abandon()
-        time_window_monitor.stop()
-        sleep_watcher.stop()
-        detection_loop.stop()
-        shutdown_audio()
-        stop_event.set()
-        sys.exit(0)
+        shutdown_app(
+            reason="signal",
+            tracker=tracker,
+            time_window_monitor=time_window_monitor,
+            sleep_watcher=sleep_watcher,
+            detection_loop=detection_loop,
+            shutdown_audio=shutdown_audio,
+            stop_event=stop_event,
+            exit_process=True,
+            state=shutdown_state,
+        )
 
     signal.signal(signal.SIGINT, on_shutdown)
     if hasattr(signal, "SIGTERM"):
@@ -435,7 +480,17 @@ def main() -> None:
         tray_thread.start()
         root.mainloop()
 
-    # Do not call on_shutdown() here; shutdown is handled by signal handler.
+    shutdown_app(
+        reason="mainloop_exit",
+        tracker=tracker,
+        time_window_monitor=time_window_monitor,
+        sleep_watcher=sleep_watcher,
+        detection_loop=detection_loop,
+        shutdown_audio=shutdown_audio,
+        stop_event=stop_event,
+        exit_process=False,
+        state=shutdown_state,
+    )
 
 
 def _configure_logging(

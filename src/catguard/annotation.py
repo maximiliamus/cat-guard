@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+from dataclasses import dataclass
 from datetime import datetime as _dt
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
@@ -37,7 +39,7 @@ except ImportError:  # pragma: no cover
 
 if TYPE_CHECKING:
     from catguard.config import Settings
-    from catguard.detection import BoundingBox
+    from catguard.detection import BoundingBox, DetectionSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +113,21 @@ def format_session_duration(total_seconds: float | int) -> str:
     return f"{hours}h {minutes}m {seconds}s"
 
 
+def _copy_boxes(boxes: "list[BoundingBox]") -> "list[BoundingBox]":
+    """Return a detached copy of bounding boxes for async/session use."""
+    return [
+        box.__class__(
+            x1=box.x1,
+            y1=box.y1,
+            x2=box.x2,
+            y2=box.y2,
+            confidence=box.confidence,
+            label=box.label,
+        )
+        for box in boxes
+    ]
+
+
 # ---------------------------------------------------------------------------
 # T012 + T013 + T018: annotate_frame()
 # ---------------------------------------------------------------------------
@@ -121,6 +138,7 @@ def annotate_frame(
     sound_label: str,
     outcome: Optional[str],
     outcome_message: Optional[str] = None,
+    captured_at: Optional[_dt] = None,
 ) -> "np.ndarray":
     """Apply all three annotation layers to a *copy* of the input frame.
 
@@ -149,6 +167,8 @@ def annotate_frame(
         is not ``None``, this string replaces the hardcoded
         default strip text.  Useful for session-timed labels such as
         ``"Cat remained after alert: 30s"``.
+    captured_at:
+        Actual frame capture time. When omitted the current local time is used.
 
     Returns
     -------
@@ -163,7 +183,7 @@ def annotate_frame(
         _draw_labelled_box(out, box.x1, box.y1, box.x2, box.y2, label)
 
     # --- Layer 2: Top info bar — sound label left, timestamp right (T013) --
-    _draw_top_bar(out, sound_label)
+    _draw_top_bar(out, sound_label, captured_at)
 
     # --- Layer 3: Outcome overlay bottom strip (T018) ----------------------
     if outcome == "detected":
@@ -283,7 +303,24 @@ def _load_unicode_font(size: int = 16):
     return _PIL_ImageFont.load_default()
 
 
-def _draw_top_bar(frame: "np.ndarray", sound_label: str) -> None:
+def _format_capture_timestamp(captured_at: Optional[_dt]) -> str:
+    """Render the overlay timestamp from the frame capture time."""
+    if captured_at is None:
+        local_dt = _dt.now()
+        if hasattr(local_dt, "astimezone"):
+            local_dt = local_dt.astimezone()
+    else:
+        local_dt = captured_at
+        if hasattr(local_dt, "astimezone"):
+            local_dt = local_dt.astimezone()
+    return local_dt.strftime("%x  %X")
+
+
+def _draw_top_bar(
+    frame: "np.ndarray",
+    sound_label: str,
+    captured_at: Optional[_dt] = None,
+) -> None:
     """Render a full-width black info bar at the top of the frame in-place.
 
     The bar is exactly BAR_HEIGHT pixels tall — the same as the bottom outcome
@@ -292,7 +329,7 @@ def _draw_top_bar(frame: "np.ndarray", sound_label: str) -> None:
     Left side : alert sound filename (Unicode-safe via Pillow).
     Right side: current local date/time.
     """
-    timestamp = _dt.now().strftime("%x  %X")  # locale-aware (FR-020/FR-021; R-002)
+    timestamp = _format_capture_timestamp(captured_at)
 
     _h, w = frame.shape[:2]
     pad = OVERLAY_PAD
@@ -421,6 +458,26 @@ def _save_annotated_async(
 # T020: EffectivenessTracker
 # ---------------------------------------------------------------------------
 
+@dataclass
+class TrackingSessionConfig:
+    """Session-start snapshot of tracking output settings."""
+
+    mode: str
+    videoclip_fps: int
+    tracking_root: Path
+    session_started_at: _dt
+    clip_paths: Optional["TrackingClipPaths"] = None
+
+
+@dataclass
+class OverlayState:
+    """Current overlay state used by explicit writes and the sampler."""
+
+    sound_label: str = "Alert: Default"
+    outcome: Optional[str] = None
+    outcome_message: Optional[str] = None
+
+
 class EffectivenessTracker:
     """Manage the saved on-disk timeline for one active cat session."""
 
@@ -429,16 +486,29 @@ class EffectivenessTracker:
         settings: "Settings",
         is_window_open: Callable[[], bool],
         on_error: Callable[[str], None],
+        detection_snapshot_getter: Optional[Callable[[], "DetectionSnapshot | None"]] = None,
     ) -> None:
         self._settings = settings
         self._is_window_open = is_window_open
         self._on_error = on_error
+        self._detection_snapshot_getter = detection_snapshot_getter or (lambda: None)
 
         self._session_start: Optional[_dt] = None
         self._cycle_count: int = 0
         self._frame_index: int = 0
         self._active_sound_label: Optional[str] = None
         self._awaiting_verification: bool = False
+        self._session_config: Optional[TrackingSessionConfig] = None
+        self._overlay_state = OverlayState()
+        self._clip_writer = None
+        self._sampler_thread: Optional[threading.Thread] = None
+        self._sampler_stop_event = threading.Event()
+        self._state_lock = threading.Lock()
+        self._recording_disabled_for_session = False
+        self._last_snapshot_frame: Optional["np.ndarray"] = None
+        self._last_snapshot_boxes: "list[BoundingBox]" = []
+        self._last_snapshot_captured_at: Optional[_dt] = None
+        self._last_snapshot_sequence = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -454,6 +524,7 @@ class EffectivenessTracker:
         frame: "np.ndarray",
         boxes: "list[BoundingBox]",
         sound_label: str,
+        captured_at: Optional[_dt] = None,
     ) -> None:
         """Start or advance a session when an alerting detection fires."""
         if self._is_pending:
@@ -469,27 +540,40 @@ class EffectivenessTracker:
             )
             return
 
-        from catguard.screenshots import build_session_filepath, resolve_root
-
+        frame_captured_at = self._coerce_capture_time(captured_at)
         is_new_session = self._session_start is None
         if self._session_start is None:
-            self._session_start = _dt.now()
+            self._session_start = frame_captured_at
             self._cycle_count = 1
             self._frame_index = 1
+            self._session_config = self._snapshot_session_config(frame_captured_at)
         else:
             self._cycle_count += 1
         self._active_sound_label = sound_label
         self._awaiting_verification = True
+        self._overlay_state = OverlayState(
+            sound_label=build_sound_label(sound_label),
+            outcome="detected",
+            outcome_message=None,
+        )
+        self._remember_snapshot(frame, boxes, frame_captured_at)
 
         if not is_new_session:
             logger.info(
                 "EffectivenessTracker.on_detection: cycle %d started for existing "
-                "session (frame_index=%d, sound=%r).",
+                "session (frame_index=%d, sound=%r, mode=%s).",
                 self._cycle_count,
                 self._frame_index,
                 sound_label,
+                self._session_mode,
             )
             return
+
+        if self._session_mode == "videoclips":
+            self._start_videoclip_session(frame, boxes, frame_captured_at)
+            return
+
+        from catguard.screenshots import build_session_filepath, resolve_root
 
         filepath = build_session_filepath(
             resolve_root(self._settings), self._session_start, self._frame_index
@@ -497,14 +581,12 @@ class EffectivenessTracker:
         annotated = annotate_frame(
             frame,
             boxes,
-            build_sound_label(sound_label),
-            "detected",
+            self._overlay_state.sound_label,
+            self._overlay_state.outcome,
         )
         logger.info(
-            "EffectivenessTracker.on_detection: session started at %s "
-            "(cycle=%d, frame_index=%d, filepath=%s).",
+            "event=tracking_session_started mode=screenshots session_start=%s frame_index=%d filepath=%s",
             self._session_start,
-            self._cycle_count,
             self._frame_index,
             filepath,
         )
@@ -521,6 +603,7 @@ class EffectivenessTracker:
         frame_bgr: "np.ndarray",
         has_cat: bool,
         boxes: "list[BoundingBox]",
+        captured_at: Optional[_dt] = None,
     ) -> None:
         """Annotate and save the live verification frame for the current cycle."""
         if self._session_start is None or not self._awaiting_verification:
@@ -534,6 +617,8 @@ class EffectivenessTracker:
         next_frame_index = self._frame_index + 1
         sound_label = build_sound_label(self._active_sound_label)
         self._awaiting_verification = False
+        frame_captured_at = self._coerce_capture_time(captured_at)
+        self._remember_snapshot(frame_bgr, boxes, frame_captured_at)
         elapsed_s = int(cycle_count * self._settings.cooldown_seconds)
         elapsed_text = format_session_duration(elapsed_s)
 
@@ -543,6 +628,28 @@ class EffectivenessTracker:
         else:
             outcome = "deterred"
             outcome_message = f"Cat disappeared after alert: {elapsed_text}"
+
+        self._overlay_state = OverlayState(
+            sound_label=sound_label,
+            outcome=outcome,
+            outcome_message=outcome_message,
+        )
+
+        if self._session_mode == "videoclips":
+            self._frame_index = next_frame_index
+            logger.info(
+                "event=tracking_verification mode=videoclips outcome=%s cycle=%d frame_index=%d elapsed=%s",
+                outcome,
+                cycle_count,
+                self._frame_index,
+                elapsed_text,
+            )
+            self._write_videoclip_frame(frame_bgr, boxes, frame_captured_at)
+            if has_cat:
+                return
+            self._finalize_videoclip(deadline_monotonic=time.monotonic() + 10.0)
+            self._reset_session()
+            return
 
         from catguard.screenshots import build_session_filepath, resolve_root
         filepath = build_session_filepath(
@@ -586,7 +693,11 @@ class EffectivenessTracker:
         )
         self._reset_session()
 
-    def abandon(self) -> None:
+    def abandon(
+        self,
+        reason: str = "abandoned",
+        deadline_monotonic: float | None = None,
+    ) -> None:
         """Immediately abandon the active session without creating a closing frame."""
         was_active = self._session_start is not None or self._awaiting_verification
         if was_active:
@@ -594,19 +705,224 @@ class EffectivenessTracker:
                 int(self._cycle_count * self._settings.cooldown_seconds)
             )
             logger.info(
-                "EffectivenessTracker.abandon: session abandoned "
-                "(cycle=%d, frame_index=%d, elapsed=%s, session_start=%s).",
+                "event=tracking_session_abandoned mode=%s reason=%s cycle=%d frame_index=%d elapsed=%s session_start=%s",
+                self._session_mode,
+                reason,
                 self._cycle_count,
                 self._frame_index,
                 elapsed_text,
                 self._session_start,
             )
+        if self._session_mode == "videoclips":
+            if deadline_monotonic is None:
+                deadline_monotonic = time.monotonic() + 10.0
+            self._finalize_videoclip(deadline_monotonic=deadline_monotonic)
         self._reset_session()
 
     def _reset_session(self) -> None:
         """Return the tracker to its idle state."""
+        self._sampler_stop_event.set()
         self._session_start = None
         self._cycle_count = 0
         self._frame_index = 0
         self._active_sound_label = None
         self._awaiting_verification = False
+        self._session_config = None
+        self._overlay_state = OverlayState()
+        self._clip_writer = None
+        self._sampler_thread = None
+        self._recording_disabled_for_session = False
+        self._last_snapshot_frame = None
+        self._last_snapshot_boxes = []
+        self._last_snapshot_captured_at = None
+        self._last_snapshot_sequence = 0
+
+    @property
+    def _session_mode(self) -> str:
+        if self._session_config is None:
+            return str(getattr(self._settings, "tracking_mode", "screenshots"))
+        return self._session_config.mode
+
+    def _coerce_capture_time(self, captured_at: Optional[_dt]) -> _dt:
+        if captured_at is None:
+            return _dt.now().astimezone()
+        if captured_at.tzinfo is None:
+            return captured_at.astimezone()
+        return captured_at.astimezone()
+
+    def _snapshot_session_config(self, session_started_at: _dt) -> TrackingSessionConfig:
+        from catguard.screenshots import resolve_root
+        from catguard.tracking_video import reserve_tracking_clip_paths
+
+        mode = str(getattr(self._settings, "tracking_mode", "screenshots")).strip().lower()
+        videoclip_fps = max(1, int(getattr(self._settings, "videoclip_fps", 1) or 1))
+        tracking_root = resolve_root(self._settings)
+        clip_paths = None
+        if mode == "videoclips":
+            clip_paths = reserve_tracking_clip_paths(tracking_root, session_started_at)
+        return TrackingSessionConfig(
+            mode=mode,
+            videoclip_fps=videoclip_fps,
+            tracking_root=tracking_root,
+            session_started_at=session_started_at,
+            clip_paths=clip_paths,
+        )
+
+    def _remember_snapshot(
+        self,
+        frame_bgr: Optional["np.ndarray"],
+        boxes: "list[BoundingBox]",
+        captured_at: _dt,
+        sequence: Optional[int] = None,
+    ) -> None:
+        if frame_bgr is None:
+            return
+        self._last_snapshot_frame = frame_bgr.copy()
+        self._last_snapshot_boxes = _copy_boxes(boxes)
+        self._last_snapshot_captured_at = captured_at
+        if sequence is None:
+            self._last_snapshot_sequence += 1
+        else:
+            self._last_snapshot_sequence = sequence
+
+    def _start_videoclip_session(
+        self,
+        frame_bgr: "np.ndarray",
+        boxes: "list[BoundingBox]",
+        captured_at: _dt,
+    ) -> None:
+        from catguard.tracking_video import TrackingClipWriter
+
+        session_config = self._session_config
+        if session_config is None or session_config.clip_paths is None:
+            logger.error("event=tracking_videoclip_missing_session_config")
+            return
+
+        self._sampler_stop_event.clear()
+        self._clip_writer = TrackingClipWriter(
+            paths=session_config.clip_paths,
+            fps=session_config.videoclip_fps,
+        )
+        logger.info(
+            "event=tracking_session_started mode=videoclips session_start=%s temp=%s final=%s",
+            session_config.session_started_at,
+            session_config.clip_paths.temp_path,
+            session_config.clip_paths.final_path,
+        )
+        if not self._write_videoclip_frame(frame_bgr, boxes, captured_at):
+            return
+        self._start_sampler_thread()
+
+    def _start_sampler_thread(self) -> None:
+        if self._recording_disabled_for_session or self._session_config is None:
+            return
+        if self._sampler_thread is not None and self._sampler_thread.is_alive():
+            return
+        self._sampler_thread = threading.Thread(
+            target=self._run_sampler_loop,
+            name="TrackingVideoSampler",
+            daemon=True,
+        )
+        self._sampler_thread.start()
+        logger.info(
+            "event=tracking_sampler_started fps=%s",
+            self._session_config.videoclip_fps,
+        )
+
+    def _run_sampler_loop(self) -> None:
+        assert self._session_config is not None
+        interval = 1.0 / max(1, self._session_config.videoclip_fps)
+        while not self._sampler_stop_event.wait(timeout=interval):
+            if self._recording_disabled_for_session or self._session_config is None:
+                return
+            snapshot = self._get_latest_video_snapshot()
+            if snapshot is None:
+                continue
+            if not self._write_videoclip_frame(
+                snapshot.frame_bgr,
+                snapshot.boxes,
+                snapshot.captured_at,
+            ):
+                return
+
+    def _get_latest_video_snapshot(self) -> Optional["DetectionSnapshot"]:
+        snapshot = self._detection_snapshot_getter()
+        if snapshot is not None:
+            self._remember_snapshot(
+                snapshot.frame_bgr,
+                snapshot.boxes,
+                snapshot.captured_at,
+                sequence=snapshot.sequence,
+            )
+            return snapshot
+        if self._last_snapshot_frame is None or self._last_snapshot_captured_at is None:
+            return None
+        from catguard.detection import DetectionSnapshot
+
+        return DetectionSnapshot(
+            frame_bgr=self._last_snapshot_frame.copy(),
+            boxes=_copy_boxes(self._last_snapshot_boxes),
+            captured_at=self._last_snapshot_captured_at,
+            sequence=self._last_snapshot_sequence,
+        )
+
+    def _write_videoclip_frame(
+        self,
+        frame_bgr: "np.ndarray",
+        boxes: "list[BoundingBox]",
+        captured_at: _dt,
+    ) -> bool:
+        if self._recording_disabled_for_session or self._clip_writer is None:
+            return False
+        overlay_state = self._overlay_state
+        annotated = annotate_frame(
+            frame_bgr,
+            boxes,
+            overlay_state.sound_label,
+            overlay_state.outcome,
+            outcome_message=overlay_state.outcome_message,
+            captured_at=captured_at,
+        )
+        ok = self._clip_writer.write_frame(annotated)
+        if not ok:
+            self._disable_videoclip_recording("write_failed")
+        return ok
+
+    def _disable_videoclip_recording(self, reason: str) -> None:
+        if self._recording_disabled_for_session:
+            return
+        self._recording_disabled_for_session = True
+        self._stop_sampler(join_timeout=2.0)
+        artifact_path = None
+        if self._clip_writer is not None:
+            artifact_path = self._clip_writer.finalize()
+        logger.error(
+            "event=tracking_clip_disabled reason=%s artifact=%s",
+            reason,
+            artifact_path,
+        )
+        try:
+            self._on_error(f"Tracking videoclip failed for the current session ({reason}).")
+        except Exception:
+            logger.exception("Tracking videoclip error callback failed.")
+        self._clip_writer = None
+
+    def _stop_sampler(self, join_timeout: float | None) -> None:
+        self._sampler_stop_event.set()
+        thread = self._sampler_thread
+        if thread is None or not thread.is_alive():
+            return
+        if thread is threading.current_thread():
+            return
+        thread.join(timeout=join_timeout)
+        logger.info("event=tracking_sampler_stopped timeout=%s", join_timeout)
+
+    def _finalize_videoclip(self, deadline_monotonic: float) -> None:
+        self._stop_sampler(join_timeout=2.0)
+        if self._clip_writer is None:
+            return
+        artifact_path = self._clip_writer.finalize(deadline_monotonic=deadline_monotonic)
+        logger.info(
+            "event=tracking_clip_finalize_complete artifact=%s",
+            artifact_path,
+        )

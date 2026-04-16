@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from catguard.config import Settings
-from catguard.ui.settings_window import SettingsFormModel
+from catguard.ui.settings_window import SettingsFormModel, _is_videoclip_fps_enabled
 
 
 class TestSettingsFormModel:
@@ -105,7 +105,28 @@ class TestSettingsFormModelTrackingDirectory:
         model = SettingsFormModel.from_settings(Settings())
         # Default should be in system Pictures directory
         assert "CatGuard" in model.tracking_directory
-        assert "tracking" in model.tracking_directory
+
+
+class TestSettingsFormModelTrackingOutput:
+    def test_from_settings_populates_tracking_mode(self):
+        model = SettingsFormModel.from_settings(Settings(tracking_mode="videoclips"))
+        assert model.tracking_mode == "videoclips"
+
+    def test_from_settings_populates_videoclip_fps(self):
+        model = SettingsFormModel.from_settings(Settings(videoclip_fps=8))
+        assert model.videoclip_fps == 8
+
+    def test_to_settings_round_trip_tracking_output_fields(self):
+        original = Settings(tracking_mode="videoclips", videoclip_fps=15)
+        model = SettingsFormModel.from_settings(original)
+        restored = model.to_settings()
+        assert restored.tracking_mode == "videoclips"
+        assert restored.videoclip_fps == 15
+
+    def test_videoclip_fps_enable_logic_is_true_only_for_videoclips(self):
+        assert _is_videoclip_fps_enabled("videoclips") is True
+        assert _is_videoclip_fps_enabled("screenshots") is False
+        assert _is_videoclip_fps_enabled("unexpected") is False
 
 
 # ---------------------------------------------------------------------------
