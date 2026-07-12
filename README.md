@@ -1,8 +1,9 @@
 # CatGuard
 
-CatGuard protects your table from your cat, and your cat from your punishment. :-)
+CatGuard protects your table from your cat, and your cat from your punishment :-)
 
-CatGuard watches your table with a webcam and plays an alert sound when it detects a cat to scare it away.
+CatGuard watches your table with a webcam and plays an alert sound when it
+detects a cat to scare it away.
 
 ![CatGuard screenshot](screenshot.jpg)
 
@@ -11,23 +12,32 @@ CatGuard watches your table with a webcam and plays an alert sound when it detec
 - Detects cats on your table or desk and plays an alert to scare them away.
 - Runs in the system tray for quick access to the app functionality.
 - Shows a live camera view with cat detection overlays.
-- Lets you choose the camera and tune detection sensitivity, cooldown, and detection FPS.
-- Supports the built-in alert sound, your own MP3/WAV files, and microphone-recorded custom alerts.
+- Lets you choose the camera and tune detection sensitivity, cooldown, and
+  detection FPS.
+- Supports the built-in alert sound, your own MP3/WAV files, and
+  microphone-recorded custom alerts.
 - Can play one specific alert sound or rotate randomly through your sound library.
 - Supports optional start at login and daily monitoring schedules.
-- Lets you take clean photos from the live view, with an optional countdown before capture.
-- Saves dated tracking screenshots or annotated session video clips for later review.
-- Tracks the full duration of each cat visit and records whether the alert worked, giving you a clear picture of how your cat responds over time.
+- Lets you take clean photos from the live view, with an optional countdown
+  before capture.
+- Saves dated tracking screenshots or annotated session video clips for later
+  review.
+- Tracks the full duration of each cat visit and records whether the alert
+  worked, giving you a clear picture of how your cat responds over time.
 
 ## Interesting Facts
 
 - The default sound is "Tom spells CAT" from [Tom and Jerry Online](https://www.tomandjerryonline.com/sounds.cfm).
 - Not a single line of Python code was written by a human.
-- It works! :-)
+- It works!
+- The app has only been tested on Windows, because that's the only system I
+  have. macOS and Linux builds are handled by CI, which is basically me saying
+  "looks good from my machine" with extra steps :-)
 
 ## Download
 
-Pre-built executables are available on the [Releases](../../releases) page. No Python installation is required.
+Pre-built executables are available on the [Releases](../../releases) page. No
+Python installation is required.
 
 1. Go to **Releases** and download the zip for your platform:
    - `catguard-{version}-windows.zip`
@@ -38,28 +48,35 @@ Pre-built executables are available on the [Releases](../../releases) page. No P
    - **Windows**: `catguard\catguard.exe`
    - **macOS / Linux**: `./catguard/catguard`
 
-On first launch, CatGuard downloads the YOLO model (`~6 MB`) and caches it locally. Internet access is required only once.
+On first launch, CatGuard downloads the YOLO model (`~6 MB`) and caches it
+locally. Internet access is required only once.
 
 ## Getting Started
 
 1. Launch CatGuard.
 2. Find the CatGuard icon in your system tray or menu bar.
-3. Open `Settings…` to choose your camera, alert sound, schedule, and save locations.
+3. Open `Settings…` to choose your camera, alert sound, schedule, and save
+   locations.
 4. Use `Live View` to show the live camera window.
-5. Use `Pause` / `Continue` when you want to stop or resume monitoring without quitting the app.
+5. Use `Pause` / `Continue` when you want to stop or resume monitoring without
+   quitting the app.
 
 ## OS Security Warnings
 
-**Windows - SmartScreen**
+### Windows - SmartScreen
 
-Because the executable is not code-signed, Windows may show a SmartScreen warning.
-To allow it: right-click the `.exe` -> **Properties** -> check **Unblock** -> **OK**, then run again.
-Alternatively, click **More info** -> **Run anyway** in the SmartScreen dialog.
+Because the executable is not code-signed, Windows may show a SmartScreen
+warning.
+To allow it: right-click the `.exe` -> **Properties** -> check **Unblock** ->
+**OK**, then run again.
+Alternatively, click **More info** -> **Run anyway** in the SmartScreen
+dialog.
 
-**macOS - Gatekeeper**
+### macOS - Gatekeeper
 
 macOS blocks unsigned apps by default.
-To allow it: open **System Settings** -> **Privacy & Security** -> scroll to the blocked app -> click **Open Anyway**.
+To allow it: open **System Settings** -> **Privacy & Security** -> scroll to the
+blocked app -> click **Open Anyway**.
 
 ## Development
 
