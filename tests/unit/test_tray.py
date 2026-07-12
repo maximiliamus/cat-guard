@@ -119,8 +119,8 @@ class TestMenuItems:
             labels = [str(item) for item in captured_items]
             assert labels == [
                 "Live View",
-                "Logs",
                 "Settings…",
+                "Logs",
                 "SEPARATOR",
                 "Pause",
                 "SEPARATOR",
@@ -288,8 +288,8 @@ class TestMenuStructure:
 
             assert labels == [
                 "Live View",
-                "Logs",
                 "Settings…",
+                "Logs",
                 "SEPARATOR",
                 "Pause",
                 "SEPARATOR",

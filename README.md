@@ -1,6 +1,10 @@
 # CatGuard
 
+CatGuard protects your table from your cat, and your cat from your punishment. :-)
+
 CatGuard watches your table with a webcam and plays an alert sound when it detects a cat to scare it away.
+
+![CatGuard screenshot](screenshot.jpg)
 
 ## Features
 
@@ -12,7 +16,7 @@ CatGuard watches your table with a webcam and plays an alert sound when it detec
 - Can play one specific alert sound or rotate randomly through your sound library.
 - Supports optional start at login and daily monitoring schedules.
 - Lets you take clean photos from the live view, with an optional countdown before capture.
-- Saves dated tracking screenshots for later review.
+- Saves dated tracking screenshots or annotated session video clips for later review.
 - Tracks the full duration of each cat visit and records whether the alert worked, giving you a clear picture of how your cat responds over time.
 
 ## Interesting Facts

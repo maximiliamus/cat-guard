@@ -544,6 +544,8 @@ class TestPauseResume:
         loop = DetectionLoop(Settings(), MagicMock())
         loop._is_tracking = False
         loop._stop_event.set()
+        loop._thread = MagicMock()
+        loop._thread.is_alive.return_value = True
         
         result = loop.resume()
         
@@ -584,6 +586,8 @@ class TestPauseResume:
         """Test that pause/resume are thread-safe."""
         loop = DetectionLoop(Settings(), MagicMock())
         loop._is_tracking = False
+        loop._thread = MagicMock()
+        loop._thread.is_alive.return_value = True
         
         results = []
         

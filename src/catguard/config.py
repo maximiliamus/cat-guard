@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 _CONFIG_DIR = Path(user_config_dir("CatGuard"))
 _CONFIG_FILE = _CONFIG_DIR / "settings.json"
+_TRACKING_MODES = frozenset({"screenshots", "videoclips"})
+_VIDEOCLIP_FORMATS = frozenset({"MJPG", "XVID", "MP4V"})
 
 
 def _default_models_directory() -> str:
@@ -68,7 +70,7 @@ class Settings(BaseModel):
         le=1.0,
         description=(
             "YOLO detection confidence threshold. "
-            "NOTE: inverse to 'sensitivity' — high sensitivity = low threshold "
+            "NOTE: inverse to 'sensitivity' - high sensitivity = low threshold "
             "(e.g. 0.20); low sensitivity = high threshold (e.g. 0.70)."
         ),
     )
@@ -81,7 +83,7 @@ class Settings(BaseModel):
         default=3.0,
         gt=0,
         le=30.0,
-        description="Camera frames analyzed per second (1–30). Higher values increase CPU usage.",
+        description="Camera frames analyzed per second (1-30). Higher values increase CPU usage.",
     )
     sound_library_paths: List[str] = Field(
         default_factory=list,
@@ -121,7 +123,7 @@ class Settings(BaseModel):
         default="18:00",
         description=(
             "End of the daily active monitoring period (HH:MM, local 24-hour time). "
-            "May precede start to span midnight (e.g. '22:00' → '06:00')."
+            "May precede start to span midnight (e.g. '22:00' to '06:00')."
         ),
     )
     models_directory: str = Field(
@@ -134,7 +136,26 @@ class Settings(BaseModel):
     )
     tracking_directory: str = Field(
         default_factory=_default_tracking_directory,
-        description="Directory where tracking screenshots are saved. Defaults to system Pictures directory.",
+        description=(
+            "Directory where tracking screenshots or video clips are saved. "
+            "Defaults to the system Pictures directory."
+        ),
+    )
+    tracking_mode: str = Field(
+        default="screenshots",
+        description="Tracking artifact mode: 'screenshots' or 'videoclips'.",
+    )
+    videoclip_fps: int = Field(
+        default=1,
+        gt=0,
+        description=(
+            "Playback frames written per second in video-clip mode. If detection is "
+            "slower, the latest processed frame is repeated to preserve real-time duration."
+        ),
+    )
+    videoclip_format: str = Field(
+        default="MJPG",
+        description="Video codec/container for tracking clips: MJPG (AVI), XVID (AVI), or MP4V (MP4).",
     )
     photo_image_format: str = Field(
         default="jpg",
@@ -144,13 +165,13 @@ class Settings(BaseModel):
         default=95,
         ge=1,
         le=100,
-        description="JPEG quality for saved photos (1–100, where 100 is best fidelity).",
+        description="JPEG quality for saved photos (1-100, where 100 is best fidelity).",
     )
     tracking_image_quality: int = Field(
         default=90,
         ge=1,
         le=100,
-        description="JPEG quality for tracking/detection screenshots (1–100).",
+        description="JPEG quality for tracking/detection screenshots (1-100).",
     )
     photo_countdown_seconds: int = Field(
         default=3,
@@ -200,6 +221,61 @@ class Settings(BaseModel):
         if ".." in path:
             raise ValueError(f"tracking_directory must not contain '..' (got {path!r})")
         return path
+
+    @field_validator("tracking_mode", mode="before")
+    @classmethod
+    def validate_tracking_mode(cls, value: object) -> str:
+        """Accept only the persisted tracking output modes."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in _TRACKING_MODES:
+                return normalized
+        logger.warning(
+            "Invalid tracking_mode value (%r) — resetting to 'screenshots'.",
+            value,
+        )
+        return "screenshots"
+
+    @field_validator("videoclip_format", mode="before")
+    @classmethod
+    def validate_videoclip_format(cls, value: object) -> str:
+        """Normalise and validate the video format; fall back to MJPG."""
+        if isinstance(value, str):
+            upper = value.strip().upper()
+            if upper in _VIDEOCLIP_FORMATS:
+                return upper
+        logger.warning("Invalid videoclip_format value (%r) - resetting to MJPG.", value)
+        return "MJPG"
+
+    @field_validator("videoclip_fps", mode="before")
+    @classmethod
+    def validate_videoclip_fps(cls, value: object) -> int:
+        """Accept positive whole numbers and sanitize invalid values to 1."""
+        if isinstance(value, bool):
+            logger.warning(
+                "Invalid videoclip_fps value (%r) — resetting to 1.",
+                value,
+            )
+            return 1
+
+        if isinstance(value, int):
+            if value > 0:
+                return value
+        elif isinstance(value, float):
+            if value.is_integer() and value > 0:
+                return int(value)
+        elif isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                parsed = int(stripped)
+                if parsed > 0:
+                    return parsed
+
+        logger.warning(
+            "Invalid videoclip_fps value (%r) — resetting to 1.",
+            value,
+        )
+        return 1
 
     @field_validator("logs_directory")
     @classmethod

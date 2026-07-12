@@ -929,3 +929,122 @@ class TestEffectivenessTrackerAbandon:
             tracker.on_detection(self._frame(), self._boxes(), "sound.wav")
         tracker.abandon()
         assert existing.exists()
+
+
+class TestEffectivenessTrackerVideoConcurrency:
+    """Video sessions keep sampler and finalizer ownership isolated."""
+
+    @staticmethod
+    def _frame(value: int = 64):
+        return np.full((80, 120, 3), value, dtype=np.uint8)
+
+    def test_rapid_next_session_gets_a_distinct_stop_event(self, tmp_path):
+        import time
+        from datetime import datetime, timedelta, timezone
+
+        from catguard.annotation import EffectivenessTracker
+        from catguard.config import Settings
+
+        class FakeWriter:
+            instances = []
+
+            def __init__(self, paths, fps, fmt):
+                self.paths = paths
+                self.frames = []
+                self.finalized = False
+                self.writes_after_finalize = 0
+                self.__class__.instances.append(self)
+
+            def write_frame(self, frame):
+                if self.finalized:
+                    self.writes_after_finalize += 1
+                    return False
+                self.frames.append(frame.copy())
+                return True
+
+            def finalize(self, deadline_monotonic=None):
+                self.finalized = True
+                return self.paths.final_path
+
+        settings = Settings(
+            tracking_directory=str(tmp_path),
+            tracking_mode="videoclips",
+            videoclip_fps=50,
+        )
+        tracker = EffectivenessTracker(settings, lambda: False, MagicMock())
+        started_at = datetime(2026, 4, 17, tzinfo=timezone.utc)
+
+        with patch("catguard.tracking_video.TrackingClipWriter", FakeWriter):
+            tracker.on_detection(self._frame(), [], "sound.wav", captured_at=started_at)
+            first_stop_event = tracker._sampler_stop_event
+            tracker.on_verification(
+                self._frame(32),
+                has_cat=False,
+                boxes=[],
+                captured_at=started_at + timedelta(seconds=1),
+            )
+
+            tracker.on_detection(
+                self._frame(96),
+                [],
+                "sound.wav",
+                captured_at=started_at + timedelta(seconds=2),
+            )
+            second_stop_event = tracker._sampler_stop_event
+
+            assert first_stop_event is not second_stop_event
+            assert first_stop_event.is_set()
+            assert not second_stop_event.is_set()
+
+            time.sleep(0.05)
+            tracker.abandon(reason="test_cleanup")
+
+        assert len(FakeWriter.instances) == 2
+        assert all(writer.finalized for writer in FakeWriter.instances)
+        assert all(writer.writes_after_finalize == 0 for writer in FakeWriter.instances)
+
+    def test_finalize_failure_surfaces_non_blocking_error(self, tmp_path):
+        import time
+        from datetime import datetime, timedelta, timezone
+
+        from catguard.annotation import EffectivenessTracker
+        from catguard.config import Settings
+
+        class FailingFinalizeWriter:
+            def __init__(self, paths, fps, fmt):
+                self.paths = paths
+
+            def write_frame(self, frame):
+                return True
+
+            def finalize(self, deadline_monotonic=None):
+                return None
+
+        on_error = MagicMock()
+        tracker = EffectivenessTracker(
+            Settings(
+                tracking_directory=str(tmp_path),
+                tracking_mode="videoclips",
+            ),
+            lambda: False,
+            on_error,
+        )
+        started_at = datetime(2026, 4, 17, tzinfo=timezone.utc)
+
+        with patch(
+            "catguard.tracking_video.TrackingClipWriter", FailingFinalizeWriter
+        ):
+            tracker.on_detection(self._frame(), [], "sound.wav", captured_at=started_at)
+            tracker.on_verification(
+                self._frame(),
+                has_cat=False,
+                boxes=[],
+                captured_at=started_at + timedelta(seconds=1),
+            )
+            deadline = time.monotonic() + 1.0
+            while not on_error.called and time.monotonic() < deadline:
+                time.sleep(0.01)
+            tracker.abandon(reason="test_cleanup")
+
+        on_error.assert_called()
+        assert "finalize_failed" in on_error.call_args.args[0]

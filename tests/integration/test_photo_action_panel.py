@@ -310,7 +310,7 @@ class TestCountdownButtonBasics:
             )
 
             assert hasattr(panel, '_delay_checkbox')
-            assert panel._delay_checkbox.cget('text') == "Delay:"
+            assert panel._delay_checkbox.cget('text') == "Delay (sec):"
 
             panel._frame.destroy()
         finally:

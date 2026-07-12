@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Callable, Optional
+import inspect
 
 # cv2 imported lazily inside functions so the module loads without opencv-python
 # installed (e.g. in CI environments where only pure-Python packages are available).
@@ -197,6 +198,7 @@ class DetectionEvent:
     confidence: float
     action: DetectionAction
     sound_file: Optional[str] = None
+    captured_at: Optional[datetime] = None
     frame_bgr: Optional[_NpArray] = None
     """Raw BGR camera frame captured at the moment of detection.
 
@@ -219,6 +221,31 @@ class Camera:
     index: int
     name: str
     available: bool
+
+
+@dataclass
+class DetectionSnapshot:
+    """Atomic processed-frame snapshot exposed to the tracker."""
+
+    frame_bgr: _NpArray
+    boxes: "list[BoundingBox]"
+    captured_at: datetime
+    sequence: int
+
+
+def _clone_boxes(boxes: "list[BoundingBox]") -> "list[BoundingBox]":
+    """Return a detached copy of the current bounding boxes list."""
+    return [
+        BoundingBox(
+            x1=box.x1,
+            y1=box.y1,
+            x2=box.x2,
+            y2=box.y2,
+            confidence=box.confidence,
+            label=box.label,
+        )
+        for box in boxes
+    ]
 
 
 def list_cameras(max_index: int = 7, active_indices: set[int] | None = None) -> list[Camera]:
@@ -301,6 +328,7 @@ class DetectionLoop:
         Updated on every frame iteration; used by ActionPanel to capture
         clean photos without detection overlays.
         """
+        self._latest_detection_snapshot: Optional[DetectionSnapshot] = None
         self._frame_lock = threading.Lock()
         self._verification_callback: Optional[Callable] = None
         # Pause/resume state management (T002, T003, T004)
@@ -450,6 +478,19 @@ class DetectionLoop:
                 return None
             return self._latest_frame.copy()
 
+    def get_latest_detection_snapshot(self) -> Optional[DetectionSnapshot]:
+        """Return a detached copy of the latest processed detection snapshot."""
+        with self._frame_lock:
+            if self._latest_detection_snapshot is None:
+                return None
+            snapshot = self._latest_detection_snapshot
+            return DetectionSnapshot(
+                frame_bgr=snapshot.frame_bgr.copy(),
+                boxes=_clone_boxes(snapshot.boxes),
+                captured_at=snapshot.captured_at,
+                sequence=snapshot.sequence,
+            )
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -550,6 +591,8 @@ class DetectionLoop:
                             logger.exception("Error callback raised an exception.")
                     break  # Exit detection loop
 
+                captured_at = datetime.now(timezone.utc).astimezone()
+
                 # Store the latest frame for remote access (e.g., photo capture)
                 with self._frame_lock:
                     self._latest_frame = frame.copy()
@@ -569,6 +612,18 @@ class DetectionLoop:
                 raw_out = self._model.run(None, {self._model_input_name: blob})[0]
                 all_boxes = _postprocess(raw_out, conf, CAT_CLASS_ID, frame.shape)
                 max_conf = max((b.confidence for b in all_boxes), default=0.0)
+                with self._frame_lock:
+                    next_sequence = (
+                        1
+                        if self._latest_detection_snapshot is None
+                        else self._latest_detection_snapshot.sequence + 1
+                    )
+                    self._latest_detection_snapshot = DetectionSnapshot(
+                        frame_bgr=frame.copy(),
+                        boxes=_clone_boxes(all_boxes),
+                        captured_at=captured_at,
+                        sequence=next_sequence,
+                    )
 
                 # Verification trigger: fires once per pending cycle on the first
                 # post-cooldown frame.  Pending state is cleared BEFORE invoking
@@ -585,7 +640,13 @@ class DetectionLoop:
                     )
                     if cb is not None:
                         try:
-                            cb(verification_frame, has_cat, all_boxes)
+                            self._invoke_verification_callback(
+                                cb,
+                                verification_frame,
+                                has_cat,
+                                _clone_boxes(all_boxes),
+                                captured_at,
+                            )
                         except Exception:
                             logger.exception("Verification callback raised an exception.")
 
@@ -600,8 +661,9 @@ class DetectionLoop:
                             timestamp=now,
                             confidence=max_conf,
                             action=DetectionAction.SOUND_PLAYED,
+                            captured_at=captured_at,
                             frame_bgr=detection_frame,
-                            boxes=all_boxes,
+                            boxes=_clone_boxes(all_boxes),
                         )
                         logger.info(
                             "Cat detected (conf=%.2f, %d box(es)) — ALERTING",
@@ -614,7 +676,8 @@ class DetectionLoop:
                             timestamp=now,
                             confidence=max_conf,
                             action=DetectionAction.COOLDOWN_SUPPRESSED,
-                            boxes=all_boxes,
+                            captured_at=captured_at,
+                            boxes=_clone_boxes(all_boxes),
                         )
                         logger.debug(
                             "Cat detected (conf=%.2f) — COOLDOWN_SUPPRESSED",
@@ -641,3 +704,22 @@ class DetectionLoop:
         finally:
             cap.release()
             logger.info("Camera %d released.", self._settings.camera_index)
+
+    @staticmethod
+    def _invoke_verification_callback(
+        cb: Callable,
+        frame_bgr: _NpArray,
+        has_cat: bool,
+        boxes: "list[BoundingBox]",
+        captured_at: datetime,
+    ) -> None:
+        """Support the new 4-argument callback and the previous 3-argument form."""
+        try:
+            params = inspect.signature(cb).parameters
+            if len(params) <= 3:
+                cb(frame_bgr, has_cat, boxes)
+                return
+        except (TypeError, ValueError):
+            # Builtins / mocks may not expose a stable signature; prefer the new API.
+            pass
+        cb(frame_bgr, has_cat, boxes, captured_at)

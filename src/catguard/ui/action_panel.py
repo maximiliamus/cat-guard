@@ -64,11 +64,11 @@ class ActionPanel:
         )
         self._take_photo_btn.pack(side=tk.LEFT, padx=2)
 
-        # Delay checkbox (label: "Delay:")
+        # Delay checkbox (label includes units for the adjacent seconds value)
         self._delay_var: tk.BooleanVar = tk.BooleanVar(value=False)
         self._delay_checkbox: tk.Checkbutton = tk.Checkbutton(
             self._left_frame,
-            text="Delay:",
+            text="Delay (sec):",
             variable=self._delay_var,
             bg="lightgray",
             command=self._on_delay_toggle,
@@ -89,9 +89,6 @@ class ActionPanel:
         self._delay_spinbox.insert(0, str(default_delay))
         self._delay_spinbox.config(state=tk.DISABLED)
         self._delay_spinbox.pack(side=tk.LEFT, padx=2)
-
-        # "sec" label after spinbox
-        tk.Label(self._left_frame, text="sec", bg="lightgray").pack(side=tk.LEFT, padx=(0, 2))
 
         # Right button frame for Close
         self._right_frame: tk.Frame = tk.Frame(self._frame, bg="lightgray")
