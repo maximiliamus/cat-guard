@@ -1,0 +1,4 @@
+interface:
+  display_name: "Release App"
+  short_description: "Run tests, version, tag, push, and watch CI"
+  default_prompt: "Use $release-app to cut a new CatGuard release."
