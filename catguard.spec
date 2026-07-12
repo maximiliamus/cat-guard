@@ -10,7 +10,7 @@ import tomllib
 # Read version from pyproject.toml (single source of truth)
 with open('pyproject.toml', 'rb') as _f:
     _meta = tomllib.load(_f)
-_version_str = _meta['project']['version']          # e.g. "0.5.0"
+_version_str = _meta['project']['version']          # e.g. "0.6.0"
 _v = tuple(int(x) for x in _version_str.split('.'))
 _vt = _v + (0,) * (4 - len(_v))                    # pad to 4-tuple
 
