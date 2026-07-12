@@ -17,7 +17,14 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from catguard.config import Settings
-from catguard.ui.settings_window import SettingsFormModel, _is_videoclip_fps_enabled
+from catguard.ui.settings_window import (
+    PARAM_DESCRIPTIONS,
+    SettingsFormModel,
+    _is_videoclip_fps_enabled,
+    _parse_positive_whole_number,
+    _videoclip_format_key,
+    _videoclip_format_label,
+)
 
 
 class TestSettingsFormModel:
@@ -116,17 +123,52 @@ class TestSettingsFormModelTrackingOutput:
         model = SettingsFormModel.from_settings(Settings(videoclip_fps=8))
         assert model.videoclip_fps == 8
 
+    def test_from_settings_populates_videoclip_format(self):
+        model = SettingsFormModel.from_settings(Settings(videoclip_format="XVID"))
+        assert model.videoclip_format == "XVID"
+
     def test_to_settings_round_trip_tracking_output_fields(self):
-        original = Settings(tracking_mode="videoclips", videoclip_fps=15)
+        original = Settings(
+            tracking_mode="videoclips",
+            videoclip_fps=15,
+            videoclip_format="MP4V",
+        )
         model = SettingsFormModel.from_settings(original)
         restored = model.to_settings()
         assert restored.tracking_mode == "videoclips"
         assert restored.videoclip_fps == 15
+        assert restored.videoclip_format == "MP4V"
 
     def test_videoclip_fps_enable_logic_is_true_only_for_videoclips(self):
         assert _is_videoclip_fps_enabled("videoclips") is True
         assert _is_videoclip_fps_enabled("screenshots") is False
         assert _is_videoclip_fps_enabled("unexpected") is False
+
+    @pytest.mark.parametrize(
+        ("key", "label"),
+        [("MJPG", "MJPG (AVI)"), ("XVID", "XVID (AVI)"), ("MP4V", "MP4V (MP4)")],
+    )
+    def test_videoclip_format_label_and_key_round_trip(self, key, label):
+        assert _videoclip_format_label(key) == label
+        assert _videoclip_format_key(label) == key
+
+    def test_unknown_videoclip_format_ui_value_falls_back_to_mjpg(self):
+        assert _videoclip_format_label("unknown") == "MJPG (AVI)"
+        assert _videoclip_format_key("unknown") == "MJPG"
+
+    @pytest.mark.parametrize("value", ["1", " 12 ", "120"])
+    def test_positive_whole_number_parser_accepts_valid_fps(self, value):
+        assert _parse_positive_whole_number(value) == int(value)
+
+    @pytest.mark.parametrize("value", ["", "0", "-1", "1.5", "abc", "１２"])
+    def test_positive_whole_number_parser_rejects_invalid_fps(self, value):
+        with pytest.raises(ValueError):
+            _parse_positive_whole_number(value)
+
+    def test_tooltip_descriptions_come_from_settings_schema(self):
+        assert PARAM_DESCRIPTIONS["videoclip_format"] == Settings.model_fields[
+            "videoclip_format"
+        ].description
 
 
 # ---------------------------------------------------------------------------

@@ -19,6 +19,14 @@ from catguard.sleep_watcher import SleepWatcher
 from catguard import main as main_module
 
 
+@pytest.fixture(autouse=True)
+def _prevent_real_detection_worker_threads():
+    """Wake tests verify restore decisions without opening a real camera worker."""
+    with patch("catguard.detection.threading.Thread") as thread_class:
+        thread_class.return_value.is_alive.return_value = True
+        yield
+
+
 def _make_on_wake_callback(detection_loop, time_window_monitor=None, now_override=None):
     """Mirror of what main.py on_wake() does: check prior state + time window."""
     was_tracking = [detection_loop.is_tracking()]

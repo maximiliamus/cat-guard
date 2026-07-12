@@ -11,8 +11,8 @@ Add an additive tracking-output choice that keeps the current per-session JPEG t
 
 **Language/Version**: Python 3.14+  
 **Primary Dependencies**: `opencv-python` (`cv2` capture, annotation, `VideoWriter`), `numpy`, `pydantic`, `tkinter`, `pystray`, `platformdirs`  
-**Storage**: Existing `tracking_directory` date subfolders; JPEG session frames in `Screenshots` mode; one `.avi` clip per `Videoclips` session plus an in-progress `.partial.avi` temp artifact; optional `-NN` suffix resolves same-second clip-name collisions  
-**Testing**: `pytest` unit and integration tests with `tmp_path`, mocks, real JPEG/video writes, OpenCV readback, and explicit tray-exit shutdown coverage; manual packaged-build verification for `MJPG` + `.avi` playback on Windows, macOS, and Linux  
+**Storage**: Existing `tracking_directory` date subfolders; JPEG session frames in `Screenshots` mode; one selected `.avi` or `.mp4` clip per `Videoclips` session plus a matching in-progress `.partial` artifact; optional `-NN` suffix resolves same-second clip-name collisions
+**Testing**: `pytest` unit and integration tests with `tmp_path`, mocks, real JPEG/video writes, OpenCV readback, codec-selection coverage, and explicit tray-exit shutdown coverage; manual packaged-build playback verification on Windows, macOS, and Linux
 **Target Platform**: Windows, macOS, and Linux desktop environments  
 **Project Type**: Single-project desktop application (`tkinter` UI + tray + background detection loop)  
 **Performance Goals**: Preserve constitution target of `<200ms` p95 detection latency, keep normal clip finalization within the spec target of 10 seconds after session close, and bound sampler-stop/finalize work so app exit cannot hang beyond that target  
@@ -120,25 +120,27 @@ tests/integration/
 
 ### Change 1 - `config.py` and `ui/settings_window.py`: add persisted tracking output settings
 
-Add two new settings fields:
+Add three new settings fields:
 
 - `tracking_mode: str = "screenshots"`
 - `videoclip_fps: int = 1`
+- `videoclip_format: str = "MJPG"`
 
 Design details:
 
 - Persist stable lowercase values (`"screenshots"` / `"videoclips"`) while the UI shows `Screenshots` / `Videoclips`.
 - Validate `tracking_mode` with a sanitizing `field_validator(..., mode="before")` that falls back to `"screenshots"` on unknown saved values instead of resetting the entire settings file.
 - Validate `videoclip_fps` with a sanitizing `mode="before"` validator that accepts only positive whole-number values, logs a warning for invalid input, and falls back to `1` for missing, invalid, or non-positive values.
+- Validate `videoclip_format` against `MJPG`, `XVID`, and `MP4V`, normalizing case and falling back to `MJPG` for missing or unsupported values.
 - The settings UI must not introduce a tighter undocumented maximum. Use a validated numeric entry or equivalent integer-only control rather than a hard-capped slider-style widget.
-- Extend `SettingsFormModel.from_settings()` / `.to_settings()` for both new fields.
-- Add a `Tracking mode` radio group and `Videoclip FPS` control on the existing Storage tab, directly under `Tracking directory`, because the controls govern how tracking artifacts are emitted and stored.
-- Disable the `Videoclip FPS` widget whenever `Tracking mode` is `Screenshots`.
-- Saving settings during an active session updates the shared `Settings` object as today, but the active tracker session ignores those new values because Change 4 snapshots mode/fps at session start.
+- Extend `SettingsFormModel.from_settings()` / `.to_settings()` for all three fields.
+- Add a dedicated Tracking tab with mode, FPS, and video-format controls under `Tracking directory`.
+- Disable the FPS and format widgets whenever `Tracking mode` is `Screenshots`.
+- Saving settings during an active session updates the shared `Settings` object as today, but the active tracker session ignores those new values because Change 4 snapshots mode, FPS, and format at session start.
 
 Why this change:
 
-- It fulfills the user-facing configuration surface without introducing a new top-level settings category.
+- It keeps all tracking-specific output choices together in one dedicated settings category.
 - Sanitizing validators are required because the current `load_settings()` path resets the full file on validation failure, which is too destructive for one bad video-fps value.
 - Avoiding a hidden `1-30` cap keeps the plan consistent with the current spec wording.
 
@@ -151,10 +153,10 @@ Add a focused module that owns clip-path generation, frame-size normalization, a
 
 Chosen output contract:
 
-- Final path: `<tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>.avi`
-- Same-second collision path: `<tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>-01.avi`, then `-02`, ...
-- Active-write temp path: same stem with `.partial.avi`
-- Codec/container: OpenCV `VideoWriter` with `MJPG` into `.avi`
+- Final path: timestamped `.avi` for MJPG/XVID or `.mp4` for MP4V.
+- Same-second collision path: append `-01`, then `-02`, ... before the selected extension.
+- Active-write temp path: same stem with `.partial.avi` or `.partial.mp4`.
+- Codec/container: OpenCV `VideoWriter` with the session-snapshotted MJPG, XVID, or MP4V selection.
 
 Design details:
 
@@ -164,17 +166,18 @@ Design details:
 - Frames are written incrementally throughout the session; the plan explicitly rejects buffering the full clip in memory because SC-001 and SC-005 require fast finalization and partial-clip preservation.
 - The writer locks `output_size` from the first successful write. Later frames with different source dimensions are normalized to that size with aspect-preserving letterbox padding inside `tracking_video.py`, so `annotation.py` does not need duplicate resize logic.
 - `write_frame()` returns a success/failure result. On failure, the tracker logs the failure, surfaces a non-blocking error, marks clip recording disabled for the current session only, and continues monitoring without falling back to JPEGs in `Videoclips` mode.
-- `finalize(deadline_monotonic)` releases the writer and renames the temp path to the final `.avi`.
+- `finalize(deadline_monotonic)` releases the writer and renames the temp path to the selected final clip path.
 - If zero frames were written, `finalize()` deletes any empty temp file and reports that no user-visible clip artifact exists for that session.
-- If final rename fails after readable frames were written, the design keeps the `.partial.avi` as the recovery artifact, reports that path in the error/log message, and does not retry indefinitely.
+- If final rename fails after readable frames were written, the design keeps the matching partial artifact, reports that path in the error/log message, and does not retry indefinitely.
 - For automated validation, a partial clip is “reviewable” when the artifact exists and OpenCV can read at least one frame from it. Cross-platform default-player compatibility for packaged builds is explicitly a manual verification boundary, not an implied automated guarantee.
-- While a session is still in progress, the only user-visible artifact is the temp `.partial.avi`. The final `.avi` becomes visible only after successful finalize.
+- While a session is still in progress, the only user-visible artifact is the selected temp path. The final clip becomes visible only after successful finalize.
 
-Why `.avi` / `MJPG`:
+Why MJPG remains the default:
 
 - It avoids introducing `ffmpeg` or another external dependency.
 - It keeps the implementation inside already-installed `opencv-python`.
 - It provides a stable container OpenCV can create and reopen in automated tests, while the packaged-player compatibility boundary remains explicit in manual verification.
+- XVID/AVI and MP4V/MP4 remain opt-in alternatives for users whose platform playback stack handles them better.
 
 ### Change 3 - `detection.py`: expose atomic processed snapshots and capture-time callback payloads
 
@@ -327,12 +330,12 @@ Why this change:
 
 - `reserve_tracking_clip_paths()` uses the session start date folder and base timestamp stem
 - same-second collisions reserve `-01`, `-02`, ... suffixes without overwriting an existing final or temp path
-- temp-path naming stays adjacent to the final `.avi`
+- temp-path naming stays adjacent to the selected final clip
 - `finalize()` renames the temp clip into the final path
 - zero-frame finalize deletes the temp file and yields no user-visible artifact
 - writer-open or frame-write failures surface as controlled exceptions/results for the tracker to handle
 - resize normalization converts later frames to the locked writer size without distortion
-- failed rename preserves a readable `.partial.avi` but removes empty/unreadable temp files
+- failed rename preserves a readable partial clip but removes empty/unreadable temp files
 - readability check succeeds only when OpenCV can read at least one frame
 
 **`tests/unit/test_annotation.py`**
@@ -365,7 +368,7 @@ Why this change:
 
 **`tests/integration/test_tracking_video_integration.py`**
 
-- a completed video-mode session creates exactly one `.avi` clip under the expected date folder
+- a completed video-mode session creates exactly one clip under the expected date folder
 - the same session creates zero standalone `*.jpg` files
 - the clip can be opened with OpenCV and contains more than one readable frame
 - the first readable frame shows the neutral `Cat detected` strip
@@ -374,9 +377,9 @@ Why this change:
 - a delayed write/readback case proves the top-bar time came from the frame capture timestamp, not finalize time
 - a same-second second session produces a collision-safe `-01` clip rather than overwriting the first clip
 - a low-throughput run where `videoclip_fps` exceeds sustainable processed-frame throughput still yields a readable clip with repeated continuity frames and no fabricated extra outcomes
-- a mid-session settings save proves the active clip keeps its original mode/fps while the next session adopts the new values
+- a mid-session settings save proves the active clip keeps its original mode/FPS/format while the next session adopts the new values
 - an interrupted session (`abandon()`) leaves a readable partial clip on disk
-- a finalize-rename failure preserves a readable `.partial.avi`, surfaces a non-blocking error, and leaves monitoring alive for subsequent sessions
+- a finalize-rename failure preserves a readable partial clip, surfaces a non-blocking error, and leaves monitoring alive for subsequent sessions
 
 **`tests/integration/test_main_shutdown.py`**
 
@@ -386,18 +389,18 @@ Why this change:
 
 ### Manual verification
 
-- Open Settings and verify the `Videoclip FPS` control enables only when `Videoclips` is selected.
-- Save `Videoclips` mode, restart the app, and confirm the same selection and fps are restored.
-- Run one session in `Videoclips` mode and verify one `.avi` appears with no `*.jpg` session frames.
+- Open Settings and verify the `Videoclip FPS` and video-format controls enable only when `Videoclips` is selected.
+- Save `Videoclips` mode, FPS, and format; restart the app and confirm all three values are restored.
+- Run sessions with each supported format and verify one matching clip appears with no `*.jpg` session frames.
 - Change settings during an active video session and confirm the active clip does not change behavior until the next session.
 - Run one short video session, interrupt it with `Pause`, and confirm a readable partial clip exists even if it contains only the opening frames.
 - Run another short video session and exit through the tray, confirming the real shutdown path also preserves a readable partial clip.
-- Validate packaged `MJPG` + `.avi` playback on Windows, macOS, and Linux before release; if a platform-specific player cannot open the artifact even though OpenCV can, document that boundary or revisit the codec choice before shipping.
+- Validate packaged playback of supported formats on Windows, macOS, and Linux before release; if a platform-specific player cannot open an artifact even though OpenCV can, document that boundary.
 - Run one session in `Screenshots` mode and verify the existing JPEG sequence still appears with no clip.
 
 ## Delivery Notes
 
-- The plan intentionally keeps the clip-container choice internal; the user-facing feature is “one reviewable clip per session,” not container/codec configuration.
+- The clip format is user-selectable, with MJPG/AVI retained as the backward-compatible default.
 - For automated acceptance, “reviewable partial clip” means OpenCV can open the artifact and read at least one frame. Default-player compatibility in packaged builds is tracked as manual release validation.
 - Repeated frames with the same capture timestamp are an explicit and acceptable representation of low-throughput continuity; they are not separate outcome events.
 - The plan does not introduce a new upper `Videoclip FPS` limit. If product requirements later need a tighter supported range, that must be added to the spec first so the constraint is user-visible and testable.

@@ -12,10 +12,119 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List
+import tkinter as tk
+from tkinter import ttk
 
-from catguard.config import Settings, _default_logs_directory, _default_models_directory, _default_photos_directory, _default_tracking_directory
-from catguard.ui.geometry import load_win_geometry, save_win_geometry
+from catguard.config import (
+    Settings,
+    _default_logs_directory,
+    _default_models_directory,
+    _default_photos_directory,
+    _default_tracking_directory,
+)
 from catguard.detection import Camera, list_cameras
+from catguard.ui.geometry import load_win_geometry, save_win_geometry
+
+
+VIDEOCLIP_FORMAT_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("MJPG", "MJPG (AVI)"),
+    ("XVID", "XVID (AVI)"),
+    ("MP4V", "MP4V (MP4)"),
+)
+
+
+def _videoclip_format_label(key: str) -> str:
+    normalized = str(key).strip().upper()
+    return next(
+        (label for format_key, label in VIDEOCLIP_FORMAT_OPTIONS if format_key == normalized),
+        VIDEOCLIP_FORMAT_OPTIONS[0][1],
+    )
+
+
+def _videoclip_format_key(label: str) -> str:
+    return next(
+        (format_key for format_key, option in VIDEOCLIP_FORMAT_OPTIONS if option == label),
+        VIDEOCLIP_FORMAT_OPTIONS[0][0],
+    )
+
+
+def _parse_positive_whole_number(value: str) -> int:
+    normalized = value.strip()
+    if not normalized.isascii() or not normalized.isdigit():
+        raise ValueError("value must be a positive whole number")
+    result = int(normalized)
+    if result <= 0:
+        raise ValueError("value must be a positive whole number")
+    return result
+
+# --- Tooltip helper ---
+class ToolTip:
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tipwindow = None
+        widget.bind("<Enter>", self.show)
+        widget.bind("<Leave>", self.hide)
+
+    def show(self, event=None):
+        if self.tipwindow or not self.text:
+            return
+        x = self.widget.winfo_rootx() + self.widget.winfo_width() + 4
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() // 2
+        self.tipwindow = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(1)
+        tw.wm_geometry(f"+{x}+{y}")
+        label = tk.Label(tw, text=self.text, justify=tk.LEFT,
+                         background="#ffffe0", relief=tk.SOLID, borderwidth=1,
+                         font=(None, 9), wraplength=320)
+        label.pack(ipadx=4, ipady=4)
+
+    def hide(self, event=None):
+        tw = self.tipwindow
+        self.tipwindow = None
+        if tw:
+            tw.destroy()
+
+def get_param_descriptions():
+    descs = {}
+    for name, field in Settings.model_fields.items():
+        desc = field.description
+        if desc:
+            descs[name] = desc
+    return descs
+PARAM_DESCRIPTIONS = get_param_descriptions()
+PARAM_DESCRIPTIONS["alerts_directory"] = (
+    "Directory where alert sound files are stored and loaded from. "
+    "You can add MP3 or WAV files here to use as custom alert sounds."
+)
+
+def _make_info_icon(parent):
+    """Return a small canvas widget: blue circle with white italic 'i'."""
+    size = 16
+    icon = tk.Canvas(parent, width=size, height=size, highlightthickness=0, bd=0)
+    try:
+        icon.configure(bg=parent.cget("bg"))
+    except tk.TclError:
+        pass
+    r = size // 2 - 1
+    cx, cy = size // 2, size // 2
+    icon.create_oval(cx - r, cy - r, cx + r, cy + r, fill="#0077cc", outline="")
+    icon.create_text(cx, cy + 1, text="i", fill="white", font=("Arial", 8, "bold italic"))
+    return icon
+
+
+def add_label_with_info(parent, text, param_key, row, column, **grid_kwargs):
+    frame = tk.Frame(parent)
+    label = tk.Label(frame, text=text)
+    label.pack(side="left")
+    icon = _make_info_icon(frame)
+    icon.pack(side="left", padx=(4, 0))
+    desc = PARAM_DESCRIPTIONS.get(param_key, "No description available.")
+    ToolTip(label, desc)
+    ToolTip(icon, desc)
+    grid_kwargs.setdefault("sticky", "e")
+    frame.grid(row=row, column=column, **grid_kwargs)
+    return label
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +147,7 @@ class SettingsFormModel:
     tracking_directory: str = field(default_factory=_default_tracking_directory)
     tracking_mode: str = "screenshots"
     videoclip_fps: int = 1
+    videoclip_format: str = "MJPG"
     photos_directory: str = field(default_factory=_default_photos_directory)
     photo_countdown_seconds: int = 3
     # Audio playback fields (T004)
@@ -71,6 +181,7 @@ class SettingsFormModel:
             tracking_directory=s.tracking_directory,
             tracking_mode=s.tracking_mode,
             videoclip_fps=s.videoclip_fps,
+            videoclip_format=s.videoclip_format,
             photos_directory=s.photos_directory,
             photo_countdown_seconds=s.photo_countdown_seconds,
             use_default_sound=s.use_default_sound,
@@ -101,6 +212,7 @@ class SettingsFormModel:
             tracking_directory=self.tracking_directory,
             tracking_mode=self.tracking_mode,
             videoclip_fps=self.videoclip_fps,
+            videoclip_format=self.videoclip_format,
             photos_directory=self.photos_directory,
             photo_countdown_seconds=self.photo_countdown_seconds,
             use_default_sound=self.use_default_sound,
@@ -246,16 +358,18 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tab_detection = ttk.Frame(notebook, padding=8)
     tab_models    = ttk.Frame(notebook, padding=8)
     tab_sound     = ttk.Frame(notebook, padding=8)
-    tab_storage   = ttk.Frame(notebook, padding=8)
+    tab_tracking  = ttk.Frame(notebook, padding=8)
+    tab_photos    = ttk.Frame(notebook, padding=8)
     tab_schedule  = ttk.Frame(notebook, padding=8)
     tab_general   = ttk.Frame(notebook, padding=8)
     tab_logs      = ttk.Frame(notebook, padding=8)
 
     notebook.add(tab_general,   text="General")
     notebook.add(tab_detection, text="Detection")
-    notebook.add(tab_models,    text="Models")
+    notebook.add(tab_tracking,  text="Tracking")
+    notebook.add(tab_photos,    text="Photos")
     notebook.add(tab_sound,     text="Alerts")
-    notebook.add(tab_storage,   text="Storage")
+    notebook.add(tab_models,    text="Models")
     notebook.add(tab_schedule,  text="Schedule")
     notebook.add(tab_logs,      text="Logs")
 
@@ -265,20 +379,21 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tab_models.columnconfigure(1, weight=1)
     tab_sound.columnconfigure(1, weight=1)
     tab_sound.rowconfigure(2, weight=1)   # listbox row grows vertically
-    tab_storage.columnconfigure(1, weight=1)
+    tab_tracking.columnconfigure(1, weight=1)
+    tab_photos.columnconfigure(1, weight=1)
     tab_schedule.columnconfigure(1, weight=1)
     tab_logs.columnconfigure(1, weight=1)
 
     # ==== Detection tab ==================================================
 
     # ---- Camera index ---------------------------------------------------
-    tk.Label(tab_detection, text="Camera index:").grid(row=0, column=0, sticky="e", **pad)
+    add_label_with_info(tab_detection, "Camera index:", "camera_index", row=0, column=0, **pad)
     cam_var = tk.StringVar(value="Loading…")
     cam_combo = ttk.Combobox(tab_detection, textvariable=cam_var, values=["Loading…"], state="disabled", width=30)
     cam_combo.grid(row=0, column=1, sticky="ew", **pad)
 
     # ---- Detection sensitivity ------------------------------------------
-    tk.Label(tab_detection, text="Detection sensitivity:").grid(row=1, column=0, sticky="e", **pad)
+    add_label_with_info(tab_detection, "Detection sensitivity:", "confidence_threshold", row=1, column=0, **pad)
     conf_var = tk.DoubleVar(value=model.confidence_threshold)
     sensitivity_frame = tk.Frame(tab_detection)
     sensitivity_frame.grid(row=1, column=1, sticky="ew", **pad)
@@ -304,19 +419,19 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     threshold_label.pack(side="left", padx=(4, 0))
 
     # ---- Cooldown -------------------------------------------------------
-    tk.Label(tab_detection, text="Cooldown (sec):").grid(row=2, column=0, sticky="e", **pad)
+    add_label_with_info(tab_detection, "Cooldown (sec):", "cooldown_seconds", row=2, column=0, **pad)
     cool_var = tk.DoubleVar(value=model.cooldown_seconds)
     tk.Spinbox(tab_detection, from_=1.0, to=300.0, increment=1.0, textvariable=cool_var, width=8, format="%.0f").grid(row=2, column=1, sticky="w", **pad)
 
     # ---- Detection FPS --------------------------------------------------
-    tk.Label(tab_detection, text="Detection FPS:").grid(row=3, column=0, sticky="e", **pad)
+    add_label_with_info(tab_detection, "Detection FPS:", "detection_fps", row=3, column=0, **pad)
     fps_var = tk.DoubleVar(value=model.detection_fps)
     tk.Spinbox(tab_detection, from_=1.0, to=30.0, increment=1.0, textvariable=fps_var, width=8, format="%.0f").grid(row=3, column=1, sticky="w", **pad)
 
     # ==== Models tab ======================================================
 
     # ---- Models directory -----------------------------------------------
-    tk.Label(tab_models, text="Models directory:").grid(row=0, column=0, sticky="e", **pad)
+    add_label_with_info(tab_models, "Models directory:", "models_directory", row=0, column=0, **pad)
     models_folder_var = tk.StringVar(value=model.models_directory)
     models_folder_frame = tk.Frame(tab_models)
     models_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
@@ -348,7 +463,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
             return full_path
 
     # ---- Alerts library --------------------------------------------------
-    tk.Label(tab_sound, text="Alerts library:").grid(row=2, column=0, sticky="ne", **pad)
+    add_label_with_info(tab_sound, "Alerts library:", "sound_library_paths", row=2, column=0, sticky="ne", **pad)
     path_listbox = tk.Listbox(tab_sound, height=5, width=40)
     _paths_list: list[str] = []  # full paths, parallel to listbox entries
     for p in model.sound_library_paths:
@@ -600,7 +715,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     # ---- Sound tab: alerts ----------------------------------------------
     # T015: "Use default alert" checkbox
     use_default_var = tk.BooleanVar(value=model.use_default_sound)
-    tk.Label(tab_sound, text="Use default alert:").grid(row=5, column=0, sticky="e", **pad)
+    add_label_with_info(tab_sound, "Use default alert:", "use_default_sound", row=5, column=0, **pad)
     _use_default_frame = tk.Frame(tab_sound)
     _use_default_frame.grid(row=5, column=1, sticky="ew", **pad)
     _use_default_cb = tk.Checkbutton(_use_default_frame, variable=use_default_var, takefocus=0)
@@ -621,7 +736,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tk.Button(_use_default_frame, text="\u25b6 Play", command=_play_default_sound).pack(side="left", padx=(6, 0))
 
     # T019: "Play Only This Sound" dropdown
-    tk.Label(tab_sound, text="Play alert:").grid(row=4, column=0, sticky="e", **pad)
+    add_label_with_info(tab_sound, "Play alert:", "pinned_sound", row=4, column=0, **pad)
     _initial_pinned_label = _display_label(model.pinned_sound) if model.pinned_sound else "All (in random order)"
     _initial_values = ["All (in random order)"] + [_display_label(p) for p in _paths_list]
     if model.pinned_sound and _initial_pinned_label not in _initial_values:
@@ -653,7 +768,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     _update_dropdown_state()  # set initial state without playing
 
     # T013: Alerts directory (read-only path + Browse button on same line)
-    tk.Label(tab_sound, text="Alerts directory:").grid(row=0, column=0, sticky="e", **pad)
+    add_label_with_info(tab_sound, "Alerts directory:", "alerts_directory", row=0, column=0, **pad)
     alerts_var = tk.StringVar(value=str(alerts_dir))
     alerts_row_frame = tk.Frame(tab_sound)
     alerts_row_frame.grid(row=0, column=1, sticky="ew", **pad)
@@ -771,12 +886,12 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         name_prompt.protocol("WM_DELETE_WINDOW", _do_cancel)
         name_prompt.wait_window()
 
-    # ==== Storage tab ====================================================
+    # ==== Tracking tab ===================================================
 
     # ---- Tracking directory ---------------------------------------------
-    tk.Label(tab_storage, text="Tracking directory:").grid(row=0, column=0, sticky="e", **pad)
+    add_label_with_info(tab_tracking, "Tracking directory:", "tracking_directory", row=0, column=0, **pad)
     folder_var = tk.StringVar(value=model.tracking_directory)
-    ss_folder_frame = tk.Frame(tab_storage)
+    ss_folder_frame = tk.Frame(tab_tracking)
     ss_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
 
     def _browse_folder():
@@ -793,9 +908,9 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tk.Entry(ss_folder_frame, textvariable=folder_var, state="readonly").pack(side="left", fill="x", expand=True)
 
     # ---- Tracking output mode ------------------------------------------
-    tk.Label(tab_storage, text="Tracking mode:").grid(row=1, column=0, sticky="e", **pad)
+    add_label_with_info(tab_tracking, "Tracking mode:", "tracking_mode", row=1, column=0, **pad)
     tracking_mode_var = tk.StringVar(value=model.tracking_mode)
-    tracking_mode_frame = tk.Frame(tab_storage)
+    tracking_mode_frame = tk.Frame(tab_tracking)
     tracking_mode_frame.grid(row=1, column=1, sticky="w", **pad)
     tk.Radiobutton(
         tracking_mode_frame,
@@ -811,24 +926,38 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     ).pack(side="left", padx=(8, 0))
 
     # ---- Videoclip FPS --------------------------------------------------
-    tk.Label(tab_storage, text="Videoclip FPS:").grid(row=2, column=0, sticky="e", **pad)
+    add_label_with_info(tab_tracking, "Videoclip FPS:", "videoclip_fps", row=2, column=0, **pad)
     videoclip_fps_var = tk.StringVar(value=str(model.videoclip_fps))
-    videoclip_fps_entry = tk.Entry(tab_storage, textvariable=videoclip_fps_var, width=8)
+    videoclip_fps_entry = tk.Entry(tab_tracking, textvariable=videoclip_fps_var, width=8)
     videoclip_fps_entry.grid(row=2, column=1, sticky="w", **pad)
 
-    def _update_videoclip_fps_state(*_):
-        videoclip_fps_entry.config(
-            state="normal" if _is_videoclip_fps_enabled(tracking_mode_var.get()) else "disabled"
-        )
+    # ---- Videoclip format -----------------------------------------------
+    add_label_with_info(tab_tracking, "Video format:", "videoclip_format", row=3, column=0, **pad)
+    videoclip_format_var = tk.StringVar(value=_videoclip_format_label(model.videoclip_format))
+    videoclip_format_combo = ttk.Combobox(
+        tab_tracking,
+        textvariable=videoclip_format_var,
+        values=[label for _key, label in VIDEOCLIP_FORMAT_OPTIONS],
+        state="readonly",
+        width=14,
+    )
+    videoclip_format_combo.grid(row=3, column=1, sticky="w", **pad)
 
-    tracking_mode_var.trace_add("write", _update_videoclip_fps_state)
-    _update_videoclip_fps_state()
+    def _update_videoclip_controls_state(*_):
+        state = "normal" if _is_videoclip_fps_enabled(tracking_mode_var.get()) else "disabled"
+        videoclip_fps_entry.config(state=state)
+        videoclip_format_combo.config(state="readonly" if state == "normal" else "disabled")
+
+    tracking_mode_var.trace_add("write", _update_videoclip_controls_state)
+    _update_videoclip_controls_state()
+
+    # ==== Photos tab =====================================================
 
     # ---- Photos directory -----------------------------------------------
-    tk.Label(tab_storage, text="Photos directory:").grid(row=3, column=0, sticky="e", **pad)
+    add_label_with_info(tab_photos, "Photos directory:", "photos_directory", row=0, column=0, **pad)
     photos_folder_var = tk.StringVar(value=model.photos_directory)
-    photos_folder_frame = tk.Frame(tab_storage)
-    photos_folder_frame.grid(row=3, column=1, sticky="ew", **pad)
+    photos_folder_frame = tk.Frame(tab_photos)
+    photos_folder_frame.grid(row=0, column=1, sticky="ew", **pad)
 
     def _browse_photos_folder():
         chosen = filedialog.askdirectory(
@@ -846,33 +975,32 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     # ==== Schedule tab ===================================================
 
     track_win_enabled_var = tk.BooleanVar(value=model.tracking_window_enabled)
-    tk.Checkbutton(
-        tab_schedule,
-        text="Only monitor within a daily time window",
-        variable=track_win_enabled_var,
-    ).grid(row=0, column=0, columnspan=2, sticky="w", **pad)
+    add_label_with_info(tab_schedule, "Daily time window:", "tracking_window_enabled", row=0, column=0, **pad)
+    _tw_cb_frame = tk.Frame(tab_schedule)
+    _tw_cb_frame.grid(row=0, column=1, sticky="w", **pad)
+    tk.Checkbutton(_tw_cb_frame, variable=track_win_enabled_var, takefocus=0).pack(side="left")
+    _tw_cb_frame.bind("<Button-1>", lambda _e: track_win_enabled_var.set(not track_win_enabled_var.get()))
 
     track_win_start_var = tk.StringVar(value=model.tracking_window_start)
     track_win_end_var = tk.StringVar(value=model.tracking_window_end)
 
-    tw_track_frame = tk.Frame(tab_schedule)
-    tw_track_frame.grid(row=1, column=0, columnspan=2, sticky="w", **pad)
-    tk.Label(tw_track_frame, text="From:").pack(side="left")
+    add_label_with_info(tab_schedule, "From:", "tracking_window_start", row=1, column=0, **pad)
     track_start_spin = tk.Spinbox(
-        tw_track_frame,
+        tab_schedule,
         textvariable=track_win_start_var,
         values=(*(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),),
         width=6,
     )
-    track_start_spin.pack(side="left", padx=(2, 6))
-    tk.Label(tw_track_frame, text="To:").pack(side="left")
+    track_start_spin.grid(row=1, column=1, sticky="w", **pad)
+
+    add_label_with_info(tab_schedule, "To:", "tracking_window_end", row=2, column=0, **pad)
     track_end_spin = tk.Spinbox(
-        tw_track_frame,
+        tab_schedule,
         textvariable=track_win_end_var,
         values=(*(f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 30)),),
         width=6,
     )
-    track_end_spin.pack(side="left", padx=2)
+    track_end_spin.grid(row=2, column=1, sticky="w", **pad)
 
     def _update_track_tw_state(*_):
         state = "normal" if track_win_enabled_var.get() else "disabled"
@@ -885,13 +1013,13 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     # ==== General tab ====================================================
 
     # ---- Photo countdown ------------------------------------------------
-    tk.Label(tab_general, text="Photo countdown (sec):").grid(row=0, column=0, sticky="e", **pad)
+    add_label_with_info(tab_general, "Photo countdown (sec):", "photo_countdown_seconds", row=0, column=0, **pad)
     photo_countdown_var = tk.IntVar(value=model.photo_countdown_seconds)
     photo_countdown_spin = tk.Spinbox(tab_general, from_=1, to=30, increment=1, textvariable=photo_countdown_var, width=8)
     photo_countdown_spin.grid(row=0, column=1, sticky="w", **pad)
 
     auto_var = tk.BooleanVar(value=model.autostart)
-    tk.Label(tab_general, text="Start CatGuard at login:").grid(row=1, column=0, sticky="e", **pad)
+    add_label_with_info(tab_general, "Start CatGuard at login:", "autostart", row=1, column=0, **pad)
     _auto_frame = tk.Frame(tab_general)
     _auto_frame.grid(row=1, column=1, sticky="ew", **pad)
     auto_check = tk.Checkbutton(_auto_frame, variable=auto_var, takefocus=0)
@@ -930,7 +1058,7 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     batch_size_var = tk.IntVar(value=model.log_trim_batch_size)
     auto_refresh_interval_var = tk.IntVar(value=model.log_auto_refresh_interval)
 
-    tk.Label(tab_logs, text="Logs directory:").grid(row=0, column=0, sticky="w", **pad)
+    add_label_with_info(tab_logs, "Logs directory:", "logs_directory", row=0, column=0, **pad)
     logs_dir_frame = tk.Frame(tab_logs)
     logs_dir_frame.grid(row=0, column=1, sticky="ew", **pad)
 
@@ -947,16 +1075,28 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
     tk.Button(logs_dir_frame, text="Browse\u2026", command=_browse_logs_dir).pack(side="right", padx=(4, 2))
     tk.Entry(logs_dir_frame, textvariable=logs_dir_var, state="readonly").pack(side="left", fill="x", expand=True)
 
-    tk.Label(tab_logs, text="Max log entries:").grid(row=1, column=0, sticky="w", **pad)
+    add_label_with_info(tab_logs, "Max log entries:", "max_log_entries", row=1, column=0, **pad)
     tk.Spinbox(tab_logs, from_=2048, to=1_000_000, textvariable=max_entries_var, width=10).grid(row=1, column=1, sticky="w", **pad)
 
-    tk.Label(tab_logs, text="Trim batch size:").grid(row=2, column=0, sticky="w", **pad)
+    add_label_with_info(tab_logs, "Trim batch size:", "log_trim_batch_size", row=2, column=0, **pad)
     tk.Spinbox(tab_logs, from_=205, to=100_000, textvariable=batch_size_var, width=10).grid(row=2, column=1, sticky="w", **pad)
 
-    tk.Label(tab_logs, text="Auto-refresh interval (sec):").grid(row=3, column=0, sticky="w", **pad)
+    add_label_with_info(tab_logs, "Refresh interval (sec):", "log_auto_refresh_interval", row=3, column=0, **pad)
     tk.Spinbox(tab_logs, from_=1, to=3600, textvariable=auto_refresh_interval_var, width=10).grid(row=3, column=1, sticky="w", **pad)
 
     def _save():
+        try:
+            videoclip_fps = _parse_positive_whole_number(videoclip_fps_var.get())
+        except ValueError:
+            if tracking_mode_var.get() == "videoclips":
+                messagebox.showerror(
+                    "Invalid value",
+                    "Videoclip FPS must be a positive whole number.",
+                    parent=win,
+                )
+                return
+            videoclip_fps = model.videoclip_fps
+
         try:
             # Extract camera index from combo value "0  Camera 0"
             cam_idx = int(cam_var.get().split()[0])
@@ -973,11 +1113,8 @@ def open_settings_window(root, settings: Settings, on_settings_saved: Callable) 
         model.models_directory = models_folder_var.get()
         model.tracking_directory = folder_var.get()
         model.tracking_mode = tracking_mode_var.get()
-        fps_value = videoclip_fps_var.get().strip()
-        if fps_value.isdigit():
-            model.videoclip_fps = int(fps_value)
-        else:
-            model.videoclip_fps = fps_value  # sanitized by Settings validator on save
+        model.videoclip_fps = videoclip_fps
+        model.videoclip_format = _videoclip_format_key(videoclip_format_var.get())
         model.photos_directory = photos_folder_var.get()
         model.photo_countdown_seconds = photo_countdown_var.get()
         # T016: persist audio playback settings

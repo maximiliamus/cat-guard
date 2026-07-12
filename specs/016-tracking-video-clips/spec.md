@@ -77,6 +77,7 @@ A user who prefers the current screenshot workflow wants to keep using it withou
 - A session is interrupted before a final disappearance outcome is confirmed: the app preserves a partial clip containing all footage captured so far and does not invent a final success or failure message that never occurred.
 - The tracking directory is unavailable or cannot be written when a clip should be saved: monitoring continues, the failure is logged, and the user receives a non-blocking error.
 - A saved `Videoclip FPS` value is missing, invalid, non-integer, or non-positive when Settings are loaded: the app falls back to the default value `1` rather than leaving video mode unusable.
+- A saved video-format value is missing or unsupported: the app falls back to `MJPG (AVI)` so existing settings and platform defaults remain usable.
 
 ## Requirements *(mandatory)*
 
@@ -91,6 +92,9 @@ A user who prefers the current screenshot workflow wants to keep using it withou
 - **FR-005**: `Videoclip FPS` MUST accept only positive whole-number values.
 - **FR-006**: When `Tracking mode` is `Screenshots`, the `Videoclip FPS` control MUST be unavailable or visually inactive.
 - **FR-007**: The selected `Tracking mode` and `Videoclip FPS` value MUST be persisted across app restarts.
+- **FR-007a**: In `Videoclips` mode, the Settings window MUST let the user choose `MJPG (AVI)`, `XVID (AVI)`, or `MP4V (MP4)` output.
+- **FR-007b**: The default video format MUST be `MJPG (AVI)` for backward compatibility.
+- **FR-007c**: The selected video format MUST be persisted and snapshotted at session start so an active session is not changed by later settings edits.
 
 **Videoclip Session Output**
 
@@ -109,7 +113,7 @@ A user who prefers the current screenshot workflow wants to keep using it withou
 **Compatibility and Failure Handling**
 
 - **FR-018**: When `Tracking mode` is `Screenshots`, the system MUST continue the current screenshot-based tracking workflow and MUST NOT create a video clip for that session.
-- **FR-019**: Changing `Tracking mode` or `Videoclip FPS` during an active cat session MUST NOT alter the artifact already in progress; the new setting applies starting with the next session.
+- **FR-019**: Changing `Tracking mode`, `Videoclip FPS`, or video format during an active cat session MUST NOT alter the artifact already in progress; the new setting applies starting with the next session.
 - **FR-020**: If a cat session ends unexpectedly before a disappearance outcome is confirmed, the system MUST preserve the captured footage for that session as a partial clip and MUST NOT fabricate a final outcome that did not occur.
 - **FR-021**: If a tracking clip cannot be created or saved, the system MUST continue monitoring normally, MUST log the failure, and MUST present a non-blocking user-visible error.
 
@@ -117,6 +121,7 @@ A user who prefers the current screenshot workflow wants to keep using it withou
 
 - **Tracking Mode**: The user-selected output type for tracked cat sessions. Values: `Screenshots` or `Videoclips`.
 - **Videoclip FPS**: The user-configured frame-capture cadence, in frames per second, used only when `Tracking mode` is `Videoclips`.
+- **Videoclip Format**: The session-locked codec/container selection: `MJPG (AVI)`, `XVID (AVI)`, or `MP4V (MP4)`.
 - **Tracking Videoclip**: A single saved session artifact that represents one cat visit as an annotated moving image instead of a still-image sequence.
 - **Session Outcome Overlay**: The visible session-status messaging shown within tracked artifacts, including the timed remained and disappeared messages associated with cooldown-based evaluations.
 
@@ -126,6 +131,6 @@ A user who prefers the current screenshot workflow wants to keep using it withou
 
 - **SC-001**: In `Videoclips` mode, every fully completed cat session produces exactly one saved clip in the tracking directory within 10 seconds of session completion, with zero standalone tracking JPEG files created for that same session.
 - **SC-002**: In validation runs covering both one-cycle and multi-cycle sessions, users can determine the alert sound name, frame time, and final session outcome by reviewing the saved clip alone without opening separate screenshots or logs.
-- **SC-003**: In 100% of tested runs, changing `Tracking mode` or `Videoclip FPS` in Settings takes effect for the next cat session after saving and persists across restart.
+- **SC-003**: In 100% of tested runs, changing `Tracking mode`, `Videoclip FPS`, or video format in Settings takes effect for the next cat session after saving and persists across restart.
 - **SC-004**: In `Screenshots` mode, 100% of tested sessions continue producing screenshot-based tracking artifacts only, with no unexpected video clip file created.
 - **SC-005**: In interruption tests covering manual pause, camera error, and schedule stop, 100% of sessions that captured footage before interruption retain a partial reviewable clip rather than losing all evidence.

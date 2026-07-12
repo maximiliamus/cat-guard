@@ -10,14 +10,17 @@ Persisted settings:
 ```python
 tracking_mode: Literal["screenshots", "videoclips"]
 videoclip_fps: int  # positive whole number
+videoclip_format: Literal["MJPG", "XVID", "MP4V"]
 ```
 
 Rules:
 
 - Default `tracking_mode` is `"screenshots"`.
 - Default `videoclip_fps` is `1`.
+- Default `videoclip_format` is `"MJPG"`.
 - Unknown `tracking_mode` values are sanitized to `"screenshots"`.
 - Invalid or non-positive `videoclip_fps` values are sanitized to `1`.
+- Unknown `videoclip_format` values are sanitized to `"MJPG"`.
 - The `Videoclip FPS` control is disabled in the UI when `tracking_mode == "screenshots"`.
 - The UI must not impose an additional undocumented upper bound that is stricter than the specification.
 
@@ -33,15 +36,17 @@ Rules:
 
 - `001` is the session-start frame.
 - Later JPEGs increment in save order.
-- No `.avi` clip is created for that session.
+- No `.avi` or `.mp4` clip is created for that session.
 
 ## 3. Video-Mode Output Contract
 
 When `tracking_mode == "videoclips"`, one session produces one final clip:
 
 ```text
-final: <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].avi
-temp:  <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].partial.avi
+MJPG/XVID final: <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].avi
+MJPG/XVID temp:  <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].partial.avi
+MP4V final:      <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].mp4
+MP4V temp:       <tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].partial.mp4
 ```
 
 Rules:
@@ -50,8 +55,8 @@ Rules:
 - Same-second collisions append `-01`, `-02`, ... before the extension.
 - No standalone tracking `*.jpg` files are emitted for that same session.
 - The writer streams frames into the temp path while the session is active.
-- The final `.avi` appears only after successful finalize.
-- If final rename fails after readable frames were written, the readable `.partial.avi` remains as the recovery artifact.
+- The final `.avi` or `.mp4` appears only after successful finalize.
+- If final rename fails after readable frames were written, the matching readable `.partial.avi` or `.partial.mp4` remains as the recovery artifact.
 
 ## 4. Clip Frame Contract
 

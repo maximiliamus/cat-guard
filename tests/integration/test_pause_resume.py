@@ -18,6 +18,14 @@ from catguard.config import Settings
 from catguard.detection import DetectionLoop
 
 
+@pytest.fixture(autouse=True)
+def _prevent_real_detection_worker_threads():
+    """These tests exercise state transitions, not camera/model worker I/O."""
+    with patch("catguard.detection.threading.Thread") as thread_class:
+        thread_class.return_value.is_alive.return_value = True
+        yield
+
+
 class TestPauseResumeIntegration:
     """Integration tests for pause/resume functionality."""
 

@@ -10,8 +10,8 @@ from catguard.tray import build_tray_icon
 
 EXPECTED_ACTIVE_LABELS = [
     "Live View",
-    "Logs",
     "Settings…",
+    "Logs",
     "SEPARATOR",
     "Pause",
     "SEPARATOR",
@@ -23,8 +23,8 @@ EXPECTED_ACTIVE_LABELS = [
 
 EXPECTED_PAUSED_LABELS = [
     "Live View",
-    "Logs",
     "Settings…",
+    "Logs",
     "SEPARATOR",
     "Continue",
     "SEPARATOR",

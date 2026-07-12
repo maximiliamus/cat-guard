@@ -177,8 +177,8 @@ def build_tray_icon(
     # Reorganized menu with separators (T032, T033, T010)
     menu = pystray.Menu(
         pystray.MenuItem("Live View", on_live_view_clicked),
-        pystray.MenuItem("Logs", on_logs_clicked),
         pystray.MenuItem("Settings\u2026", on_settings_clicked),
+        pystray.MenuItem("Logs", on_logs_clicked),
         pystray.Menu.SEPARATOR,
         pystray.MenuItem(pause_label, on_pause_continue_clicked),
         pystray.Menu.SEPARATOR,
@@ -279,8 +279,8 @@ def update_tray_menu(icon: pystray.Icon, is_tracking: bool, root, settings,
         # Reorganized menu with separators (T032, T033)
         menu = pystray.Menu(
             pystray.MenuItem("Live View", on_live_view_clicked),
-            pystray.MenuItem("Logs", on_logs_clicked),
             pystray.MenuItem("Settings\u2026", on_settings_clicked),
+            pystray.MenuItem("Logs", on_logs_clicked),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem(pause_label, on_pause_continue_clicked),
             pystray.Menu.SEPARATOR,

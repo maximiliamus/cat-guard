@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,16 +22,37 @@ class TrackingClipPaths:
     temp_path: Path
 
 
-def reserve_tracking_clip_paths(root: Path, session_ts: datetime) -> TrackingClipPaths:
+# Maps the user-facing format name to (fourcc_str, file_extension).
+_FORMAT_MAP: dict[str, tuple[str, str]] = {
+    "MJPG": ("MJPG", ".avi"),
+    "XVID": ("XVID", ".avi"),
+    "MP4V": ("mp4v", ".mp4"),
+}
+_DEFAULT_FORMAT = "MJPG"
+
+
+def _normalise_format(fmt: object) -> str:
+    """Return a supported format key, falling back to the portable default."""
+    if isinstance(fmt, str):
+        normalized = fmt.strip().upper()
+        if normalized in _FORMAT_MAP:
+            return normalized
+    return _DEFAULT_FORMAT
+
+
+def reserve_tracking_clip_paths(
+    root: Path, session_ts: datetime, fmt: str = _DEFAULT_FORMAT
+) -> TrackingClipPaths:
     """Reserve collision-safe temp/final clip paths for one session."""
+    _, ext = _FORMAT_MAP[_normalise_format(fmt)]
     date_dir = root / session_ts.strftime("%Y-%m-%d")
     stem = session_ts.strftime("%Y%m%d-%H%M%S")
 
     counter = 0
     while True:
         suffix = "" if counter == 0 else f"-{counter:02d}"
-        final_path = date_dir / f"{stem}{suffix}.avi"
-        temp_path = date_dir / f"{stem}{suffix}.partial.avi"
+        final_path = date_dir / f"{stem}{suffix}{ext}"
+        temp_path = date_dir / f"{stem}{suffix}.partial{ext}"
         if not final_path.exists() and not temp_path.exists():
             logger.info(
                 "event=tracking_clip_reserved final=%s temp=%s",
@@ -42,14 +64,18 @@ def reserve_tracking_clip_paths(root: Path, session_ts: datetime) -> TrackingCli
 
 
 class TrackingClipWriter:
-    """Write session frames into a temporary MJPG AVI and finalize it later."""
+    """Write session frames into a temporary video file and finalize it later."""
 
-    def __init__(self, paths: TrackingClipPaths, fps: int) -> None:
+    def __init__(self, paths: TrackingClipPaths, fps: int, fmt: str = _DEFAULT_FORMAT) -> None:
         self.paths = paths
         self.fps = max(1, int(fps))
+        self.fmt = _normalise_format(fmt)
         self._writer: cv2.VideoWriter | None = None
         self._output_size: tuple[int, int] | None = None
         self._frames_written = 0
+        self._write_lock = threading.Lock()
+        self._closed = False
+        self._finalized_path: Path | None = None
 
     @property
     def frames_written(self) -> int:
@@ -57,85 +83,116 @@ class TrackingClipWriter:
 
     def write_frame(self, frame_bgr: np.ndarray) -> bool:
         """Write one frame, opening the writer lazily from the first frame."""
-        try:
-            frame_to_write = frame_bgr
-            if self._writer is None:
-                frame_h, frame_w = frame_bgr.shape[:2]
-                self._output_size = (frame_w, frame_h)
-                if not self._open_writer():
-                    return False
-            elif self._output_size is not None:
-                frame_to_write = self._normalise_frame(frame_bgr, self._output_size)
+        with self._write_lock:
+            if self._closed:
+                logger.warning(
+                    "event=tracking_clip_write_after_close path=%s",
+                    self.paths.temp_path,
+                )
+                return False
+            try:
+                frame_to_write = frame_bgr
+                if self._writer is None:
+                    frame_h, frame_w = frame_bgr.shape[:2]
+                    self._output_size = (frame_w, frame_h)
+                    if not self._open_writer():
+                        return False
+                elif self._output_size is not None:
+                    frame_to_write = self._normalise_frame(frame_bgr, self._output_size)
 
-            assert self._writer is not None  # for type checkers
-            self._writer.write(frame_to_write)
-            self._frames_written += 1
-            logger.info(
-                "event=tracking_clip_frame_written path=%s frames_written=%d",
-                self.paths.temp_path,
-                self._frames_written,
-            )
-            return True
-        except Exception:
-            logger.exception(
-                "event=tracking_clip_write_failed path=%s",
-                self.paths.temp_path,
-            )
-            self._release_writer()
-            return False
+                assert self._writer is not None  # for type checkers
+                self._writer.write(frame_to_write)
+                self._frames_written += 1
+                logger.debug(
+                    "event=tracking_clip_frame_written path=%s frames_written=%d",
+                    self.paths.temp_path,
+                    self._frames_written,
+                )
+                return True
+            except Exception:
+                logger.exception(
+                    "event=tracking_clip_write_failed path=%s",
+                    self.paths.temp_path,
+                )
+                self._closed = True
+                self._release_writer()
+                return False
 
     def finalize(self, deadline_monotonic: float | None = None) -> Path | None:
         """Release the writer and promote the temp file into the final clip path."""
-        start = time.monotonic()
-        self._release_writer()
-
-        if self._frames_written == 0:
-            self.paths.temp_path.unlink(missing_ok=True)
-            logger.info(
-                "event=tracking_clip_finalize_empty temp=%s",
-                self.paths.temp_path,
+        if deadline_monotonic is None:
+            acquired = self._write_lock.acquire()
+        else:
+            acquired = self._write_lock.acquire(
+                timeout=max(0.0, deadline_monotonic - time.monotonic())
             )
-            return None
-
-        if not self._is_readable_video(self.paths.temp_path):
-            self.paths.temp_path.unlink(missing_ok=True)
-            logger.warning(
-                "event=tracking_clip_finalize_unreadable temp=%s",
+        if not acquired:
+            logger.error(
+                "event=tracking_clip_finalize_lock_timeout temp=%s",
                 self.paths.temp_path,
             )
             return None
 
         try:
-            self.paths.final_path.parent.mkdir(parents=True, exist_ok=True)
-            result = self.paths.temp_path.replace(self.paths.final_path)
-            logger.info(
-                "event=tracking_clip_finalized final=%s elapsed=%.3fs",
-                result,
-                time.monotonic() - start,
-            )
-            return result
-        except Exception:
-            logger.exception(
-                "event=tracking_clip_finalize_rename_failed temp=%s final=%s",
-                self.paths.temp_path,
-                self.paths.final_path,
-            )
-            if self._is_readable_video(self.paths.temp_path):
-                return self.paths.temp_path
-            self.paths.temp_path.unlink(missing_ok=True)
-            return None
-        finally:
-            if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
-                logger.warning(
-                    "event=tracking_clip_finalize_deadline_exceeded temp=%s deadline=%.3f",
+            if self._finalized_path is not None:
+                return self._finalized_path
+
+            start = time.monotonic()
+            self._closed = True
+            self._release_writer()
+
+            if self._frames_written == 0:
+                self._remove_temp_file()
+                logger.info(
+                    "event=tracking_clip_finalize_empty temp=%s",
                     self.paths.temp_path,
-                    deadline_monotonic,
                 )
+                return None
+
+            if not self._is_readable_video(self.paths.temp_path):
+                self._remove_temp_file()
+                logger.warning(
+                    "event=tracking_clip_finalize_unreadable temp=%s",
+                    self.paths.temp_path,
+                )
+                return None
+
+            try:
+                self.paths.final_path.parent.mkdir(parents=True, exist_ok=True)
+                result = self.paths.temp_path.replace(self.paths.final_path)
+                logger.info(
+                    "event=tracking_clip_finalized final=%s elapsed=%.3fs",
+                    result,
+                    time.monotonic() - start,
+                )
+                self._finalized_path = result
+                return result
+            except Exception:
+                logger.exception(
+                    "event=tracking_clip_finalize_rename_failed temp=%s final=%s",
+                    self.paths.temp_path,
+                    self.paths.final_path,
+                )
+                if self._is_readable_video(self.paths.temp_path):
+                    self._finalized_path = self.paths.temp_path
+                    return self.paths.temp_path
+                self._remove_temp_file()
+                return None
+            finally:
+                if deadline_monotonic is not None and time.monotonic() > deadline_monotonic:
+                    logger.warning(
+                        "event=tracking_clip_finalize_deadline_exceeded temp=%s deadline=%.3f",
+                        self.paths.temp_path,
+                        deadline_monotonic,
+                    )
+        finally:
+            self._write_lock.release()
 
     def _open_writer(self) -> bool:
         assert self._output_size is not None
         self.paths.temp_path.parent.mkdir(parents=True, exist_ok=True)
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
+        fourcc_str, _ = _FORMAT_MAP.get(self.fmt, _FORMAT_MAP[_DEFAULT_FORMAT])
+        fourcc = cv2.VideoWriter_fourcc(*fourcc_str)
         self._writer = cv2.VideoWriter(
             str(self.paths.temp_path),
             fourcc,
@@ -158,6 +215,15 @@ class TrackingClipWriter:
             self._output_size,
         )
         return True
+
+    def _remove_temp_file(self) -> None:
+        try:
+            self.paths.temp_path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception(
+                "event=tracking_clip_temp_remove_failed temp=%s",
+                self.paths.temp_path,
+            )
 
     def _release_writer(self) -> None:
         if self._writer is None:
@@ -190,13 +256,20 @@ class TrackingClipWriter:
 
     @staticmethod
     def _is_readable_video(path: Path) -> bool:
-        if not path.exists() or path.stat().st_size == 0:
+        try:
+            if not path.exists() or path.stat().st_size == 0:
+                return False
+            cap = cv2.VideoCapture(str(path))
+        except (OSError, cv2.error):
+            logger.exception("event=tracking_clip_readability_check_failed path=%s", path)
             return False
-        cap = cv2.VideoCapture(str(path))
         try:
             if not cap.isOpened():
                 return False
             ok, _frame = cap.read()
             return bool(ok)
+        except cv2.error:
+            logger.exception("event=tracking_clip_readability_check_failed path=%s", path)
+            return False
         finally:
             cap.release()

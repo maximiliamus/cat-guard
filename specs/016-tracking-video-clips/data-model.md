@@ -15,12 +15,14 @@ User-configured tracking output choices stored in `Settings`.
 |---|---|---|
 | `tracking_mode` | `Literal["screenshots", "videoclips"]` | Chooses whether tracked cat sessions are emitted as JPEG sequences or one session clip. |
 | `videoclip_fps` | `int` | Positive whole-number target encode cadence used only when `tracking_mode == "videoclips"`. |
+| `videoclip_format` | `Literal["MJPG", "XVID", "MP4V"]` | Codec/container used for new video sessions. |
 | `tracking_directory` | `str` | Existing root directory for date-organized tracking artifacts. |
 
 **Validation rules**:
 
 - `tracking_mode` falls back to `"screenshots"` when a saved value is unknown.
 - `videoclip_fps` falls back to `1` when a saved value is invalid or not a positive whole number.
+- `videoclip_format` falls back to `"MJPG"` when a saved value is missing or unsupported.
 - `videoclip_fps` has no effect when `tracking_mode == "screenshots"`.
 
 ---
@@ -34,6 +36,7 @@ Session-start snapshot owned by `EffectivenessTracker`.
 | `session_start` | `datetime` | Timestamp of the first alert in the session. Determines the date folder and filename prefix for the entire artifact, even if the session crosses midnight. |
 | `mode` | `Literal["screenshots", "videoclips"]` | Output mode locked for the lifetime of the session. |
 | `videoclip_fps` | `int` | Session-locked target clip cadence used only when `mode == "videoclips"`. |
+| `videoclip_format` | `Literal["MJPG", "XVID", "MP4V"]` | Session-locked codec/container selection. |
 | `tracking_root` | `Path` | Resolved tracking directory used for all session artifacts. |
 | `clip_paths` | `TrackingClipPaths \| None` | Reserved temp/final clip paths for video mode, including any same-second collision suffix. |
 
@@ -89,15 +92,15 @@ Reserved file paths for one session-scoped video artifact.
 
 | Field | Type | Description |
 |---|---|---|
-| `final_path` | `Path` | `<tracking_directory>/<YYYY-MM-DD>/<YYYYMMDD-HHmmss>[-NN].avi` |
-| `temp_path` | `Path` | Sibling temp file using the same stem with `.partial.avi` suffix while the session is active |
+| `final_path` | `Path` | Timestamped `.avi` for MJPG/XVID or `.mp4` for MP4V |
+| `temp_path` | `Path` | Sibling temp file using `.partial.avi` or `.partial.mp4` while active |
 | `collision_index` | `int` | `0` for the base timestamp stem, otherwise `1`, `2`, ... for same-second collision suffixes |
 
 **Rules**:
 
 - Paths are reserved from `session_start`, not from later verification times.
 - Same-second collisions append `-01`, `-02`, ... before the extension.
-- The final `.avi` appears only after successful finalize; during recording, only the `.partial.avi` may be user-visible.
+- The final clip appears only after successful finalize; during recording, only its matching `.partial` artifact may be user-visible.
 
 ---
 
@@ -109,6 +112,7 @@ One session-scoped video file produced when `tracking_mode == "videoclips"`.
 |---|---|
 | `paths` | Reserved `TrackingClipPaths` for the session |
 | `fps` | Session snapshot `videoclip_fps` |
+| `format` | Session snapshot `videoclip_format` |
 | `output_size` | Dimensions locked from the first successfully written frame |
 | `frame_count` | Number of frames successfully written so far |
 | `status` | `recording`, `finalized`, `finalized_partial`, `failed_current_session`, or `failed_unreadable` |
@@ -120,7 +124,7 @@ One session-scoped video file produced when `tracking_mode == "videoclips"`.
 - No standalone `*.jpg` tracking files are created for that same session.
 - `finalize()` preserves a partial clip if at least one readable frame was written.
 - Later frames with a different source resolution are normalized to `output_size` inside the clip writer before encode.
-- If final rename fails after readable frames exist, the `.partial.avi` remains as the recovery artifact for that session.
+- If final rename fails after readable frames exist, the matching `.partial.avi` or `.partial.mp4` remains as the recovery artifact for that session.
 
 ---
 
@@ -170,7 +174,7 @@ Unchanged JPEG output path for the existing session timeline.
 [idle]
   |
   | on_detection(first alert)
-  | -> snapshot mode=videoclips + videoclip_fps
+  | -> snapshot mode=videoclips + videoclip_fps + videoclip_format
   | -> reserve unique temp/final clip paths
   | -> append immediate "Cat detected" frame
   | -> start sampler thread
@@ -193,7 +197,7 @@ Unchanged JPEG output path for the existing session timeline.
   | -> update overlay to "Cat disappeared after alert: <duration>"
   | -> append verification frame immediately
   | -> stop sampler
-  | -> finalize temp clip to final .avi
+  | -> finalize temp clip to the selected .avi or .mp4 output
   | -> reset session
   v
 [idle]
@@ -219,7 +223,7 @@ Interruption path:
 
 | Module | Planned change |
 |---|---|
-| `src/catguard/config.py` | Add persisted `tracking_mode` / `videoclip_fps` with sanitizing validators |
+| `src/catguard/config.py` | Add persisted tracking mode, FPS, and format with sanitizing validators |
 | `src/catguard/ui/settings_window.py` | Add Storage-tab mode controls and model round-trip for new fields |
 | `src/catguard/detection.py` | Expose latest processed detection snapshot plus capture timestamps for detection/verification callbacks |
 | `src/catguard/annotation.py` | Snapshot session config, branch artifact strategy, manage clip sampler lifecycle, and pass capture times into annotation |

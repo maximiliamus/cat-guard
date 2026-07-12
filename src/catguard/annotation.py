@@ -40,6 +40,7 @@ except ImportError:  # pragma: no cover
 if TYPE_CHECKING:
     from catguard.config import Settings
     from catguard.detection import BoundingBox, DetectionSnapshot
+    from catguard.tracking_video import TrackingClipPaths, TrackingClipWriter
 
 logger = logging.getLogger(__name__)
 
@@ -464,6 +465,7 @@ class TrackingSessionConfig:
 
     mode: str
     videoclip_fps: int
+    videoclip_format: str
     tracking_root: Path
     session_started_at: _dt
     clip_paths: Optional["TrackingClipPaths"] = None
@@ -494,16 +496,19 @@ class EffectivenessTracker:
         self._detection_snapshot_getter = detection_snapshot_getter or (lambda: None)
 
         self._session_start: Optional[_dt] = None
+        self._session_started_monotonic: Optional[float] = None
         self._cycle_count: int = 0
         self._frame_index: int = 0
         self._active_sound_label: Optional[str] = None
         self._awaiting_verification: bool = False
         self._session_config: Optional[TrackingSessionConfig] = None
         self._overlay_state = OverlayState()
-        self._clip_writer = None
+        self._clip_writer: Optional["TrackingClipWriter"] = None
         self._sampler_thread: Optional[threading.Thread] = None
         self._sampler_stop_event = threading.Event()
-        self._state_lock = threading.Lock()
+        self._state_lock = threading.RLock()
+        self._lifecycle_lock = threading.RLock()
+        self._finalizer_threads: set[threading.Thread] = set()
         self._recording_disabled_for_session = False
         self._last_snapshot_frame: Optional["np.ndarray"] = None
         self._last_snapshot_boxes: "list[BoundingBox]" = []
@@ -527,6 +532,16 @@ class EffectivenessTracker:
         captured_at: Optional[_dt] = None,
     ) -> None:
         """Start or advance a session when an alerting detection fires."""
+        with self._lifecycle_lock:
+            self._on_detection(frame, boxes, sound_label, captured_at)
+
+    def _on_detection(
+        self,
+        frame: "np.ndarray",
+        boxes: "list[BoundingBox]",
+        sound_label: str,
+        captured_at: Optional[_dt],
+    ) -> None:
         if self._is_pending:
             logger.debug(
                 "EffectivenessTracker.on_detection: already awaiting verification; "
@@ -544,6 +559,7 @@ class EffectivenessTracker:
         is_new_session = self._session_start is None
         if self._session_start is None:
             self._session_start = frame_captured_at
+            self._session_started_monotonic = time.monotonic()
             self._cycle_count = 1
             self._frame_index = 1
             self._session_config = self._snapshot_session_config(frame_captured_at)
@@ -606,6 +622,16 @@ class EffectivenessTracker:
         captured_at: Optional[_dt] = None,
     ) -> None:
         """Annotate and save the live verification frame for the current cycle."""
+        with self._lifecycle_lock:
+            self._on_verification(frame_bgr, has_cat, boxes, captured_at)
+
+    def _on_verification(
+        self,
+        frame_bgr: "np.ndarray",
+        has_cat: bool,
+        boxes: "list[BoundingBox]",
+        captured_at: Optional[_dt],
+    ) -> None:
         if self._session_start is None or not self._awaiting_verification:
             logger.debug(
                 "EffectivenessTracker.on_verification: no active verification pending."
@@ -647,8 +673,20 @@ class EffectivenessTracker:
             self._write_videoclip_frame(frame_bgr, boxes, frame_captured_at)
             if has_cat:
                 return
-            self._finalize_videoclip(deadline_monotonic=time.monotonic() + 10.0)
-            self._reset_session()
+            with self._state_lock:
+                clip_writer = self._clip_writer
+                sampler_thread = self._sampler_thread
+                sampler_stop_event = self._sampler_stop_event
+                deadline = time.monotonic() + 10.0
+                sampler_stop_event.set()
+                self._reset_session()
+                if clip_writer is not None:
+                    self._start_clip_finalizer(
+                        clip_writer,
+                        sampler_thread,
+                        sampler_stop_event,
+                        deadline,
+                    )
             return
 
         from catguard.screenshots import build_session_filepath, resolve_root
@@ -699,6 +737,14 @@ class EffectivenessTracker:
         deadline_monotonic: float | None = None,
     ) -> None:
         """Immediately abandon the active session without creating a closing frame."""
+        with self._lifecycle_lock:
+            self._abandon(reason, deadline_monotonic)
+
+    def _abandon(
+        self,
+        reason: str,
+        deadline_monotonic: float | None,
+    ) -> None:
         was_active = self._session_start is not None or self._awaiting_verification
         if was_active:
             elapsed_text = format_session_duration(
@@ -713,29 +759,32 @@ class EffectivenessTracker:
                 elapsed_text,
                 self._session_start,
             )
+        if deadline_monotonic is None:
+            deadline_monotonic = time.monotonic() + 10.0
         if self._session_mode == "videoclips":
-            if deadline_monotonic is None:
-                deadline_monotonic = time.monotonic() + 10.0
             self._finalize_videoclip(deadline_monotonic=deadline_monotonic)
         self._reset_session()
+        self._wait_for_pending_finalizers(deadline_monotonic)
 
     def _reset_session(self) -> None:
         """Return the tracker to its idle state."""
-        self._sampler_stop_event.set()
-        self._session_start = None
-        self._cycle_count = 0
-        self._frame_index = 0
-        self._active_sound_label = None
-        self._awaiting_verification = False
-        self._session_config = None
-        self._overlay_state = OverlayState()
-        self._clip_writer = None
-        self._sampler_thread = None
-        self._recording_disabled_for_session = False
-        self._last_snapshot_frame = None
-        self._last_snapshot_boxes = []
-        self._last_snapshot_captured_at = None
-        self._last_snapshot_sequence = 0
+        with self._state_lock:
+            self._sampler_stop_event.set()
+            self._session_start = None
+            self._session_started_monotonic = None
+            self._cycle_count = 0
+            self._frame_index = 0
+            self._active_sound_label = None
+            self._awaiting_verification = False
+            self._session_config = None
+            self._overlay_state = OverlayState()
+            self._clip_writer = None
+            self._sampler_thread = None
+            self._recording_disabled_for_session = False
+            self._last_snapshot_frame = None
+            self._last_snapshot_boxes = []
+            self._last_snapshot_captured_at = None
+            self._last_snapshot_sequence = 0
 
     @property
     def _session_mode(self) -> str:
@@ -756,13 +805,15 @@ class EffectivenessTracker:
 
         mode = str(getattr(self._settings, "tracking_mode", "screenshots")).strip().lower()
         videoclip_fps = max(1, int(getattr(self._settings, "videoclip_fps", 1) or 1))
+        videoclip_format = str(getattr(self._settings, "videoclip_format", "MJPG") or "MJPG").upper()
         tracking_root = resolve_root(self._settings)
         clip_paths = None
         if mode == "videoclips":
-            clip_paths = reserve_tracking_clip_paths(tracking_root, session_started_at)
+            clip_paths = reserve_tracking_clip_paths(tracking_root, session_started_at, fmt=videoclip_format)
         return TrackingSessionConfig(
             mode=mode,
             videoclip_fps=videoclip_fps,
+            videoclip_format=videoclip_format,
             tracking_root=tracking_root,
             session_started_at=session_started_at,
             clip_paths=clip_paths,
@@ -777,13 +828,14 @@ class EffectivenessTracker:
     ) -> None:
         if frame_bgr is None:
             return
-        self._last_snapshot_frame = frame_bgr.copy()
-        self._last_snapshot_boxes = _copy_boxes(boxes)
-        self._last_snapshot_captured_at = captured_at
-        if sequence is None:
-            self._last_snapshot_sequence += 1
-        else:
-            self._last_snapshot_sequence = sequence
+        with self._state_lock:
+            self._last_snapshot_frame = frame_bgr.copy()
+            self._last_snapshot_boxes = _copy_boxes(boxes)
+            self._last_snapshot_captured_at = captured_at
+            if sequence is None:
+                self._last_snapshot_sequence += 1
+            else:
+                self._last_snapshot_sequence = sequence
 
     def _start_videoclip_session(
         self,
@@ -798,11 +850,15 @@ class EffectivenessTracker:
             logger.error("event=tracking_videoclip_missing_session_config")
             return
 
-        self._sampler_stop_event.clear()
-        self._clip_writer = TrackingClipWriter(
+        sampler_stop_event = threading.Event()
+        clip_writer = TrackingClipWriter(
             paths=session_config.clip_paths,
             fps=session_config.videoclip_fps,
+            fmt=session_config.videoclip_format,
         )
+        with self._state_lock:
+            self._sampler_stop_event = sampler_stop_event
+            self._clip_writer = clip_writer
         logger.info(
             "event=tracking_session_started mode=videoclips session_start=%s temp=%s final=%s",
             session_config.session_started_at,
@@ -814,56 +870,100 @@ class EffectivenessTracker:
         self._start_sampler_thread()
 
     def _start_sampler_thread(self) -> None:
-        if self._recording_disabled_for_session or self._session_config is None:
-            return
-        if self._sampler_thread is not None and self._sampler_thread.is_alive():
-            return
-        self._sampler_thread = threading.Thread(
-            target=self._run_sampler_loop,
-            name="TrackingVideoSampler",
-            daemon=True,
-        )
-        self._sampler_thread.start()
+        with self._state_lock:
+            session_config = self._session_config
+            clip_writer = self._clip_writer
+            stop_event = self._sampler_stop_event
+            if (
+                self._recording_disabled_for_session
+                or session_config is None
+                or clip_writer is None
+            ):
+                return
+            if self._sampler_thread is not None and self._sampler_thread.is_alive():
+                return
+            sampler_thread = threading.Thread(
+                target=self._run_sampler_loop,
+                args=(stop_event, session_config.videoclip_fps, clip_writer),
+                name="TrackingVideoSampler",
+                daemon=True,
+            )
+            self._sampler_thread = sampler_thread
+        sampler_thread.start()
         logger.info(
             "event=tracking_sampler_started fps=%s",
-            self._session_config.videoclip_fps,
+            session_config.videoclip_fps,
         )
 
-    def _run_sampler_loop(self) -> None:
-        assert self._session_config is not None
-        interval = 1.0 / max(1, self._session_config.videoclip_fps)
-        while not self._sampler_stop_event.wait(timeout=interval):
-            if self._recording_disabled_for_session or self._session_config is None:
+    def _run_sampler_loop(
+        self,
+        stop_event: threading.Event,
+        videoclip_fps: int,
+        clip_writer: "TrackingClipWriter",
+    ) -> None:
+        interval = 1.0 / max(1, videoclip_fps)
+        next_tick = time.monotonic() + interval
+        while not stop_event.wait(timeout=max(0.0, next_tick - time.monotonic())):
+            if stop_event.is_set():
                 return
-            snapshot = self._get_latest_video_snapshot()
+            next_tick += interval
+            snapshot = self._get_latest_video_snapshot(
+                expected_writer=clip_writer,
+                stop_event=stop_event,
+            )
             if snapshot is None:
                 continue
+            with self._state_lock:
+                started_monotonic = self._session_started_monotonic
+            elapsed_seconds = (
+                max(0.0, time.monotonic() - started_monotonic)
+                if started_monotonic is not None
+                else None
+            )
             if not self._write_videoclip_frame(
                 snapshot.frame_bgr,
                 snapshot.boxes,
                 snapshot.captured_at,
+                expected_writer=clip_writer,
+                elapsed_seconds=elapsed_seconds,
             ):
                 return
+            now = time.monotonic()
+            if next_tick <= now:
+                missed_ticks = int((now - next_tick) // interval) + 1
+                next_tick += missed_ticks * interval
 
-    def _get_latest_video_snapshot(self) -> Optional["DetectionSnapshot"]:
+    def _get_latest_video_snapshot(
+        self,
+        *,
+        expected_writer: Optional["TrackingClipWriter"] = None,
+        stop_event: Optional[threading.Event] = None,
+    ) -> Optional["DetectionSnapshot"]:
         snapshot = self._detection_snapshot_getter()
-        if snapshot is not None:
-            self._remember_snapshot(
-                snapshot.frame_bgr,
-                snapshot.boxes,
-                snapshot.captured_at,
-                sequence=snapshot.sequence,
-            )
-            return snapshot
-        if self._last_snapshot_frame is None or self._last_snapshot_captured_at is None:
-            return None
+        with self._state_lock:
+            if stop_event is not None and stop_event.is_set():
+                return None
+            if expected_writer is not None and self._clip_writer is not expected_writer:
+                return None
+            if snapshot is not None:
+                self._last_snapshot_frame = snapshot.frame_bgr.copy()
+                self._last_snapshot_boxes = _copy_boxes(snapshot.boxes)
+                self._last_snapshot_captured_at = snapshot.captured_at
+                self._last_snapshot_sequence = snapshot.sequence
+                return snapshot
+            if self._last_snapshot_frame is None or self._last_snapshot_captured_at is None:
+                return None
+            frame = self._last_snapshot_frame.copy()
+            boxes = _copy_boxes(self._last_snapshot_boxes)
+            captured_at = self._last_snapshot_captured_at
+            sequence = self._last_snapshot_sequence
         from catguard.detection import DetectionSnapshot
 
         return DetectionSnapshot(
-            frame_bgr=self._last_snapshot_frame.copy(),
-            boxes=_copy_boxes(self._last_snapshot_boxes),
-            captured_at=self._last_snapshot_captured_at,
-            sequence=self._last_snapshot_sequence,
+            frame_bgr=frame,
+            boxes=boxes,
+            captured_at=captured_at,
+            sequence=sequence,
         )
 
     def _write_videoclip_frame(
@@ -871,58 +971,173 @@ class EffectivenessTracker:
         frame_bgr: "np.ndarray",
         boxes: "list[BoundingBox]",
         captured_at: _dt,
+        *,
+        expected_writer: Optional["TrackingClipWriter"] = None,
+        elapsed_seconds: float | None = None,
     ) -> bool:
-        if self._recording_disabled_for_session or self._clip_writer is None:
-            return False
-        overlay_state = self._overlay_state
+        with self._state_lock:
+            if self._recording_disabled_for_session or self._clip_writer is None:
+                return False
+            if expected_writer is not None and self._clip_writer is not expected_writer:
+                return False
+            overlay_state = self._overlay_state
+            clip_writer = self._clip_writer
+            session_start = self._session_start
+        # When the session is in the initial "detected" phase (no outcome message
+        # set yet), show a live elapsed timer so the clip is informative even
+        # before the verification cycle runs.
+        outcome_message = overlay_state.outcome_message
+        if overlay_state.outcome == "detected" and outcome_message is None and session_start is not None:
+            elapsed_s = (
+                elapsed_seconds
+                if elapsed_seconds is not None
+                else (captured_at - session_start).total_seconds()
+            )
+            outcome_message = f"Cat detected: {format_session_duration(elapsed_s)}"
         annotated = annotate_frame(
             frame_bgr,
             boxes,
             overlay_state.sound_label,
             overlay_state.outcome,
-            outcome_message=overlay_state.outcome_message,
+            outcome_message=outcome_message,
             captured_at=captured_at,
         )
-        ok = self._clip_writer.write_frame(annotated)
+        ok = clip_writer.write_frame(annotated)
         if not ok:
             self._disable_videoclip_recording("write_failed")
         return ok
 
     def _disable_videoclip_recording(self, reason: str) -> None:
-        if self._recording_disabled_for_session:
-            return
-        self._recording_disabled_for_session = True
+        with self._state_lock:
+            if self._recording_disabled_for_session:
+                return
+            self._recording_disabled_for_session = True
+            clip_writer = self._clip_writer
+            self._clip_writer = None
         self._stop_sampler(join_timeout=2.0)
         artifact_path = None
-        if self._clip_writer is not None:
-            artifact_path = self._clip_writer.finalize()
+        if clip_writer is not None:
+            artifact_path = clip_writer.finalize()
         logger.error(
             "event=tracking_clip_disabled reason=%s artifact=%s",
             reason,
             artifact_path,
         )
         try:
-            self._on_error(f"Tracking videoclip failed for the current session ({reason}).")
-        except Exception:
-            logger.exception("Tracking videoclip error callback failed.")
-        self._clip_writer = None
+            self._notify_videoclip_error(reason)
+        except Exception:  # pragma: no cover - helper already isolates callback failures
+            logger.exception("Tracking videoclip error notification failed.")
 
     def _stop_sampler(self, join_timeout: float | None) -> None:
-        self._sampler_stop_event.set()
-        thread = self._sampler_thread
+        with self._state_lock:
+            stop_event = self._sampler_stop_event
+            thread = self._sampler_thread
+        stop_event.set()
         if thread is None or not thread.is_alive():
             return
         if thread is threading.current_thread():
             return
         thread.join(timeout=join_timeout)
-        logger.info("event=tracking_sampler_stopped timeout=%s", join_timeout)
+        if thread.is_alive():
+            logger.warning("event=tracking_sampler_stop_timeout timeout=%s", join_timeout)
+        else:
+            logger.info("event=tracking_sampler_stopped timeout=%s", join_timeout)
 
     def _finalize_videoclip(self, deadline_monotonic: float) -> None:
         self._stop_sampler(join_timeout=2.0)
-        if self._clip_writer is None:
+        with self._state_lock:
+            clip_writer = self._clip_writer
+            self._clip_writer = None  # prevent double-finalize with _disable_videoclip_recording
+        if clip_writer is None:
             return
-        artifact_path = self._clip_writer.finalize(deadline_monotonic=deadline_monotonic)
+        artifact_path = clip_writer.finalize(deadline_monotonic=deadline_monotonic)
+        self._report_finalize_result(clip_writer, artifact_path)
+
+    def _start_clip_finalizer(
+        self,
+        clip_writer: "TrackingClipWriter",
+        sampler_thread: Optional[threading.Thread],
+        stop_event: threading.Event,
+        deadline_monotonic: float,
+    ) -> None:
+        """Finalize a completed session without blocking the detection callback."""
+        stop_event.set()
+
+        def _finalize() -> None:
+            try:
+                if (
+                    sampler_thread is not None
+                    and sampler_thread.is_alive()
+                    and sampler_thread is not threading.current_thread()
+                ):
+                    sampler_thread.join(
+                        timeout=max(0.0, min(2.0, deadline_monotonic - time.monotonic()))
+                    )
+                artifact_path = clip_writer.finalize(
+                    deadline_monotonic=deadline_monotonic
+                )
+                self._report_finalize_result(clip_writer, artifact_path)
+            except Exception:
+                logger.exception("event=tracking_clip_finalize_unhandled_error")
+                self._notify_videoclip_error("finalize_failed")
+            finally:
+                with self._state_lock:
+                    self._finalizer_threads.discard(threading.current_thread())
+
+        finalizer = threading.Thread(
+            target=_finalize,
+            name="TrackingClipFinalizer",
+            daemon=True,
+        )
+        with self._state_lock:
+            self._finalizer_threads.add(finalizer)
+        try:
+            finalizer.start()
+        except RuntimeError:
+            with self._state_lock:
+                self._finalizer_threads.discard(finalizer)
+            logger.exception("event=tracking_clip_finalizer_start_failed")
+            artifact_path = clip_writer.finalize(
+                deadline_monotonic=deadline_monotonic
+            )
+            self._report_finalize_result(clip_writer, artifact_path)
+
+    def _wait_for_pending_finalizers(self, deadline_monotonic: float) -> None:
+        while True:
+            with self._state_lock:
+                threads = tuple(self._finalizer_threads)
+            if not threads:
+                return
+            remaining = deadline_monotonic - time.monotonic()
+            if remaining <= 0:
+                logger.error(
+                    "event=tracking_clip_finalizers_deadline_exceeded count=%d",
+                    len(threads),
+                )
+                self._notify_videoclip_error("finalize_timeout")
+                return
+            for thread in threads:
+                if thread is not threading.current_thread():
+                    thread.join(timeout=max(0.0, deadline_monotonic - time.monotonic()))
+
+    def _report_finalize_result(
+        self,
+        clip_writer: "TrackingClipWriter",
+        artifact_path: Optional[Path],
+    ) -> None:
         logger.info(
             "event=tracking_clip_finalize_complete artifact=%s",
             artifact_path,
         )
+        if artifact_path is None:
+            self._notify_videoclip_error("finalize_failed")
+        elif artifact_path == clip_writer.paths.temp_path:
+            self._notify_videoclip_error("finalize_rename_failed; partial clip preserved")
+
+    def _notify_videoclip_error(self, reason: str) -> None:
+        try:
+            self._on_error(
+                f"Tracking videoclip failed for the current session ({reason})."
+            )
+        except Exception:
+            logger.exception("Tracking videoclip error callback failed.")

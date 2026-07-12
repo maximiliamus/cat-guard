@@ -159,6 +159,20 @@ class TestTrackingOutputSettings:
         s = Settings()
         assert s.videoclip_fps == 1
 
+    def test_videoclip_format_default_is_mjpg(self):
+        assert Settings().videoclip_format == "MJPG"
+
+    @pytest.mark.parametrize("value", ["mjpg", " Xvid ", "mp4v"])
+    def test_videoclip_format_normalises_supported_values(self, value):
+        assert Settings(videoclip_format=value).videoclip_format == value.strip().upper()
+
+    @pytest.mark.parametrize("value", ["h264", "", None, 123])
+    def test_videoclip_format_invalid_value_falls_back_to_mjpg(self, value, caplog):
+        with caplog.at_level(logging.WARNING, logger="catguard.config"):
+            settings = Settings(videoclip_format=value)
+        assert settings.videoclip_format == "MJPG"
+        assert "videoclip_format" in caplog.text
+
     def test_tracking_mode_invalid_value_falls_back_to_screenshots(self, caplog):
         with caplog.at_level(logging.WARNING, logger="catguard.config"):
             s = Settings(tracking_mode="not-a-mode")
@@ -185,12 +199,17 @@ class TestTrackingOutputSettings:
 
     def test_tracking_output_fields_round_trip(self, tmp_path):
         config_file = tmp_path / "settings.json"
-        original = Settings(tracking_mode="videoclips", videoclip_fps=12)
+        original = Settings(
+            tracking_mode="videoclips",
+            videoclip_fps=12,
+            videoclip_format="MP4V",
+        )
         with patch("catguard.config._config_file", return_value=config_file):
             save_settings(original)
             loaded = load_settings()
         assert loaded.tracking_mode == "videoclips"
         assert loaded.videoclip_fps == 12
+        assert loaded.videoclip_format == "MP4V"
 
 
 class TestSaveSettings:

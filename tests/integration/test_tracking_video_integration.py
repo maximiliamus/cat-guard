@@ -177,3 +177,32 @@ class TestVideoTrackingIntegration:
         elapsed = time.perf_counter() - start
 
         assert elapsed < 10.0
+
+    def test_slow_detection_repeats_latest_frame_to_preserve_clip_duration(
+        self, tmp_path: Path
+    ):
+        settings = Settings(
+            tracking_directory=str(tmp_path),
+            tracking_mode="videoclips",
+            videoclip_fps=5,
+            cooldown_seconds=1.0,
+        )
+        captured_at = datetime(2026, 3, 31, 12, 0, 0, tzinfo=timezone.utc)
+        holder = {
+            "snapshot": _snapshot(_frame(value=75), _boxes(), captured_at, 1),
+        }
+        tracker = _make_tracker(settings, holder)
+
+        tracker.on_detection(_frame(), _boxes(), "sound.wav", captured_at=captured_at)
+        time.sleep(0.65)
+        tracker.on_verification(
+            _frame(value=20),
+            has_cat=False,
+            boxes=[],
+            captured_at=captured_at + timedelta(seconds=1),
+        )
+
+        video = _wait_for_videos(tmp_path, 1)[0]
+        frames = _read_video(video)
+        assert len(frames) >= 5
+        assert len(frames) / settings.videoclip_fps >= 0.8

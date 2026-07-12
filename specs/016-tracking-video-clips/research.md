@@ -36,6 +36,8 @@
 
 **Decision**: Add a streamed `TrackingClipWriter` that writes annotated frames into a temp `.avi` file using `cv2.VideoWriter` + `MJPG`, then renames it to the final session path on finalize. Same-second collisions use `-NN` suffixes, and a readable `.partial.avi` is preserved when final rename fails after frames were written.
 
+**Implementation extension**: MJPG/AVI remains the default, while the completed settings surface also offers XVID/AVI and MP4V/MP4. The same collision-safe temp/final lifecycle applies to the selected extension.
+
 **Rationale**: Streaming avoids buffering an unbounded session in memory, satisfies the “one clip per session” requirement, and makes partial-clip preservation on pause/error/shutdown straightforward. Reserving unique paths up front avoids timestamp collisions without changing the visible session timestamp prefix.
 
 **Alternatives considered**:
