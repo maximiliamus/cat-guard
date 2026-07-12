@@ -1,6 +1,10 @@
 # CatGuard
 
+CatGuard protects your table from your cat, and your cat from your punishment. :-)
+
 CatGuard watches your table with a webcam and plays an alert sound when it detects a cat to scare it away.
+
+![CatGuard screenshot](screenshot.jpg)
 
 ## Features
 
