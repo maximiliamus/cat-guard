@@ -206,14 +206,15 @@ class TestAnnotateFrameOutcomeOverlay:
         assert not np.array_equal(bottom, bottom_orig)
 
     def test_deterred_outcome_has_green_pixels_in_strip(self):
-        """Green channel dominates in the success strip (BGR: G > R, G > B)."""
+        """Green channel dominates most of the success strip."""
         from catguard.annotation import annotate_frame
         frame = _blank_frame(200, 300)
         result = annotate_frame(frame, [], "Alert: Default", "deterred")
-        # Sample pixel in bottom strip (last 30 rows, centre column)
-        pixel = result[190, 150]  # BGR
-        assert int(pixel[1]) > int(pixel[2])  # G > R
-        assert int(pixel[1]) > int(pixel[0])  # G > B
+        strip = result[170:, :]
+        green_pixels = (strip[:, :, 1] > strip[:, :, 2]) & (
+            strip[:, :, 1] > strip[:, :, 0]
+        )
+        assert green_pixels.mean() > 0.75
 
     def test_remained_outcome_modifies_bottom_strip(self):
         from catguard.annotation import annotate_frame
@@ -224,13 +225,15 @@ class TestAnnotateFrameOutcomeOverlay:
         assert not np.array_equal(bottom, bottom_orig)
 
     def test_remained_outcome_has_red_pixels_in_strip(self):
-        """Red channel dominates in the failure strip (BGR: R > G, R > B)."""
+        """Red channel dominates most of the failure strip."""
         from catguard.annotation import annotate_frame
         frame = _blank_frame(200, 300)
         result = annotate_frame(frame, [], "Alert: Default", "remained")
-        pixel = result[190, 150]  # BGR
-        assert int(pixel[2]) > int(pixel[1])  # R > G
-        assert int(pixel[2]) > int(pixel[0])  # R > B
+        strip = result[170:, :]
+        red_pixels = (strip[:, :, 2] > strip[:, :, 1]) & (
+            strip[:, :, 2] > strip[:, :, 0]
+        )
+        assert red_pixels.mean() > 0.75
 
     def test_none_outcome_bottom_unchanged(self):
         """outcome=None must not add any overlay strip."""
